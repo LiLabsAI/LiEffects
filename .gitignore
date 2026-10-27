@@ -1,0 +1,19 @@
+# Gradle / Android build outputs
+.gradle/
+build/
+app/build/
+.kotlin/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# IDE
+.idea/
+*.iml
+
+# Local machine config
+local.properties
+.DS_Store
+
+# PREQUEL research corpus and verification evidence (kept out of the app repo)
+docs/
