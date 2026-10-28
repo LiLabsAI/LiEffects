@@ -12,7 +12,17 @@ focus) — built from a reverse-engineering study of the PREQUEL Android app (co
 * Each family has a GPU AGSL `RuntimeShader` preview **and** a deterministic CPU mirror
   (thumbnails / unit tests / Save export).
 * Features: photo picker + bundled demo photo, live-rendered effect thumbnails, 0–100
-  intensity slider, press-and-hold before/after, undo, save to `Pictures/PhotoEffects`.
+  intensity slider, press-and-hold before/after, undo, and a PREQUEL-style export sheet
+  (resolution / quality / metadata) saving to `Pictures/PhotoEffects`.
+* Save re-decodes the original photo (not the editor preview) and renders the effect on the
+  CPU mirror. The export sheet mirrors PREQUEL's: **Resolution** `HD` / `Full HD` / `4K`
+  (tiers above the source are "Not available"; the largest available tier exports at source
+  size, smaller tiers scale to a nominal long side), **Quality** `Low` / `Medium` / `High`
+  (JPEG 40 / 75 / 95) and **Metadata** `Override` (fresh capture tags only, like PREQUEL's
+  "As new media") vs `Keep` (copy the original's camera/date/GPS tags where the source
+  exposes them), with a `~N MB` size estimate. Every plan is still capped by a memory
+  budget so the heaviest CPU mirrors fit the heap (full 12 MP for light effects, ~3–8 MP
+  for the blur-heavy ones).
 
 > The PREQUEL reverse-engineering research and verification evidence are not published in this
 > repository, so `docs/` links below will not resolve here.
@@ -25,8 +35,8 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb shell am start -n com.aliahad.photoeffects/.MainActivity
 ```
 
-Tests: `./gradlew :app:testDebugUnitTest --offline` (53 JVM tests, including dusty golden
-byte-identity and per-effect fitted-target checks).
+Tests: `./gradlew :app:testDebugUnitTest --offline` (71 JVM tests, including dusty golden
+byte-identity, per-effect fitted-target, export-budget and export-planner checks).
 
 ## Where things are
 
@@ -43,6 +53,7 @@ byte-identity and per-effect fitted-target checks).
 | `app/src/main/java/com/aliahad/photoeffects/effect/DotMatrixDate.kt` | dot-matrix date stamp generator (shared by GPU overlay + CPU export) |
 | `app/src/main/java/com/aliahad/photoeffects/effect/FilmLook.kt` | cubic tone curves / gain-offset helpers |
 | `app/src/main/java/com/aliahad/photoeffects/effect/cpu/` | deterministic CPU mirrors (thumbnails/tests/export) |
+| `app/src/main/java/com/aliahad/photoeffects/photo/` | photo load/decode, export planner (resolution/quality/metadata), EXIF writer, MediaStore save |
 | `app/src/main/java/com/aliahad/photoeffects/ui/editor/` | editor UI + Effects panel |
 | `app/src/main/assets/blurmask.jpg` | PREQUEL's recovered masked-blur mask (SENSUAL) |
 | `app/src/main/assets/kuji_frame_{1..5}.png` | PREQUEL's recovered KUJI paper-frame overlays |
@@ -83,5 +94,9 @@ DUSTY grade refit, HALATION edge-gated fringe) and now pass — see the report a
 * PREQUEL's preset catalog/filters/textures and the date-stamp font are server-side; we use
   fitted analytic approximations (tone curves, grain/mottle, standard 5×7 dot font) that match
   the same-photo reference within the documented tolerances, not byte-identical copies.
+* "Keep" metadata copies the camera/date/GPS tags the source exposes. On device the photo
+  picker (HyperOS's cache copy, MediaStore streams without `ACCESS_MEDIA_LOCATION`) strips
+  location before the app sees the file, so GPS is copied only when the source still has it —
+  PREQUEL doesn't request that permission either.
 * No PREQUEL assets/binaries are used except the recovered procedural mask image
   (`blurmask.jpg`, a rendered gradient mask).

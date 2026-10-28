@@ -28,21 +28,29 @@ object PhotoLoader {
 
     suspend fun loadDemo(context: Context): LoadedPhoto = withContext(Dispatchers.IO) {
         val bytes = context.assets.open(DEMO_ASSET).use { it.readBytes() }
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         val bitmap = decodeByteArray(bytes, MAX_SOURCE_DIMENSION)
         LoadedPhoto(
             bitmap = bitmap,
             label = "Demo photo",
             sourceUri = null,
+            sourceWidth = bounds.outWidth,
+            sourceHeight = bounds.outHeight,
             id = nextId++,
             seed = contentSeed(bitmap),
         )
     }
 
     suspend fun loadFromUri(context: Context, uri: Uri): LoadedPhoto = withContext(Dispatchers.IO) {
+        var sourceWidth = 0
+        var sourceHeight = 0
         val bitmap = ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri)) { decoder, info, _ ->
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
             val w = info.size.width
             val h = info.size.height
+            sourceWidth = w
+            sourceHeight = h
             val longest = max(w, h)
             if (longest > MAX_SOURCE_DIMENSION) {
                 val scale = MAX_SOURCE_DIMENSION.toFloat() / longest
@@ -56,8 +64,77 @@ object PhotoLoader {
             bitmap = bitmap.copy(Bitmap.Config.ARGB_8888, false) ?: bitmap,
             label = "Photo",
             sourceUri = uri.toString(),
+            sourceWidth = sourceWidth,
+            sourceHeight = sourceHeight,
             id = nextId++,
             seed = contentSeed(bitmap),
+        )
+    }
+
+    /**
+     * Decode [photo] at (about) [width] x [height], for saving.
+     *
+     * The editor bitmap is capped at [MAX_SOURCE_DIMENSION]; export re-decodes the original so
+     * applying an effect does not throw away most of the photo's resolution. Falls back to a
+     * downscaled copy of the editor bitmap when the source cannot be decoded again.
+     */
+    suspend fun decodeForExport(
+        context: Context,
+        photo: LoadedPhoto,
+        width: Int,
+        height: Int,
+    ): Bitmap = withContext(Dispatchers.IO) {
+        val decoded = runCatching {
+            val uri = photo.sourceUri?.let(Uri::parse)
+            if (uri != null) decodeUriForExport(context, uri, width, height)
+            else decodeAssetForExport(context, width, height)
+        }.getOrNull() ?: return@withContext downscaleFallback(photo.bitmap, width, height)
+        if (decoded.config == Bitmap.Config.ARGB_8888) {
+            decoded
+        } else {
+            decoded.copy(Bitmap.Config.ARGB_8888, false)?.also { decoded.recycle() }
+                ?: downscaleFallback(photo.bitmap, width, height)
+        }
+    }
+
+    private fun decodeUriForExport(context: Context, uri: Uri, width: Int, height: Int): Bitmap =
+        ImageDecoder.decodeBitmap(
+            ImageDecoder.createSource(context.contentResolver, uri),
+        ) { decoder, info, _ ->
+            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            val targetWidth = width.coerceIn(1, info.size.width.coerceAtLeast(1))
+            val targetHeight = height.coerceIn(1, info.size.height.coerceAtLeast(1))
+            if (targetWidth != info.size.width || targetHeight != info.size.height) {
+                decoder.setTargetSize(targetWidth, targetHeight)
+            }
+        }
+
+    private fun decodeAssetForExport(context: Context, width: Int, height: Int): Bitmap {
+        val bytes = context.assets.open(DEMO_ASSET).use { it.readBytes() }
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        val opts = BitmapFactory.Options().apply {
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+            inSampleSize = sampleSize(bounds.outWidth, bounds.outHeight, max(width, height))
+        }
+        var bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+            ?: error("Could not decode demo photo")
+        if (bitmap.width != width || bitmap.height != height) {
+            val scaled = Bitmap.createScaledBitmap(bitmap, width, height, true)
+            if (scaled !== bitmap) bitmap.recycle()
+            bitmap = scaled
+        }
+        return bitmap
+    }
+
+    private fun downscaleFallback(bitmap: Bitmap, width: Int, height: Int): Bitmap {
+        if (bitmap.width <= width && bitmap.height <= height) return bitmap
+        val scale = min(width.toFloat() / bitmap.width, height.toFloat() / bitmap.height)
+        return Bitmap.createScaledBitmap(
+            bitmap,
+            (bitmap.width * scale).roundToInt().coerceAtLeast(1),
+            (bitmap.height * scale).roundToInt().coerceAtLeast(1),
+            true,
         )
     }
 

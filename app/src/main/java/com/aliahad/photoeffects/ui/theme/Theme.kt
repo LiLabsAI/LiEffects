@@ -23,6 +23,10 @@ object EditorColors {
     val TextMuted = Color(0xFF63636E)
     val Hairline = Color(0xFF262630)
     val Track = Color(0xFF3A3A45)
+    /** Bottom sheet surface (export settings), one step above [Background]. */
+    val Sheet = Color(0xFF1B1B1F)
+    /** Segmented option tiles inside the sheet. */
+    val Tile = Color(0xFF26262B)
 }
 
 private val EditorTypography = Typography(

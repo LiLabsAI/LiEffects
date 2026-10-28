@@ -10,9 +10,6 @@ import kotlin.math.roundToInt
  */
 object EffectBitmapRenderer {
 
-    /** Largest edge used for exported images (balance of quality vs. CPU render time). */
-    const val EXPORT_MAX_DIMENSION = 1440
-
     /** Thumbnails are rendered at this size, then shown cropped in the card. */
     const val THUMBNAIL_MAX_DIMENSION = 420
 
@@ -40,6 +37,17 @@ object EffectBitmapRenderer {
         if (scaled !== source) scaled.recycle()
         return result
     }
+
+    /**
+     * Render [effect] at the source resolution without downscaling; used for full-quality
+     * export, where the caller already sized the source to fit the memory budget.
+     */
+    fun renderFull(
+        source: Bitmap,
+        effect: PhotoEffect,
+        intensityPercent: Int,
+        seed: Long,
+    ): Bitmap = render(source, effect, intensityPercent, seed, maxOf(source.width, source.height))
 
     /** Small deterministic render used for the Effects panel cards. */
     fun renderThumbnail(

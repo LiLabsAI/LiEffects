@@ -50,10 +50,20 @@ data class PhotoEffect(
      * overlay on top of the AGSL result (see `PhotoPreviewCard`).
      */
     val stamp: DotMatrixDate.StampSpec? = null,
+    /**
+     * Rough peak Java-heap cost of one CPU export render in bytes per pixel, including the
+     * caller's pixel buffers. Used to pick the largest safe export resolution.
+     */
+    val exportBytesPerPixel: Int = DEFAULT_EXPORT_BYTES_PER_PIXEL,
 ) {
     val id: String get() = spec.id
     val displayName: String get() = spec.displayName
     val defaultIntensity: Int get() = spec.defaultIntensity
+
+    companion object {
+        /** Conservative fallback for renderers whose peak has not been analysed. */
+        const val DEFAULT_EXPORT_BYTES_PER_PIXEL = 48
+    }
 }
 
 /** Builds one DUSTY preset (shared AGSL shader + deterministic CPU mirror) from a parameter row. */
@@ -76,6 +86,7 @@ object DustyEffectFactory {
             uniforms = params.toUniforms(),
         ),
         summary = params.summary(),
+        exportBytesPerPixel = 28,
     )
 }
 
@@ -99,6 +110,7 @@ object HalationEffectFactory {
             uniforms = params.toUniforms(),
         ),
         summary = params.summary(),
+        exportBytesPerPixel = 28,
     )
 }
 
@@ -123,6 +135,7 @@ object YesterdayEffectFactory {
         ),
         summary = params.summary(),
         stamp = params.stampSpec(),
+        exportBytesPerPixel = 44,
     )
 }
 
@@ -148,6 +161,7 @@ object SensualEffectFactory {
             extraShaderAssets = mapOf("uMask" to "blurmask.jpg"),
         ),
         summary = params.summary(),
+        exportBytesPerPixel = 56,
     )
 }
 
@@ -173,6 +187,7 @@ object KujiEffectFactory {
             extraShaderAssets = mapOf(KujiUniforms.FRAME_SHADER to params.frameAsset),
         ),
         summary = params.summary(),
+        exportBytesPerPixel = 12,
     )
 }
 
@@ -199,5 +214,6 @@ object FocalEffectFactory {
             pixelSpaceShaders = setOf(FocalUniforms.LUT_SHADER),
         ),
         summary = params.summary(),
+        exportBytesPerPixel = 12,
     )
 }

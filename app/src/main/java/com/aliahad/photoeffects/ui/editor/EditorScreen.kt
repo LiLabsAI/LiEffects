@@ -58,63 +58,77 @@ fun EditorScreen(
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
-    Column(
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(EditorColors.Background),
     ) {
-        EditorTopBar(
-            canUndo = state.canUndo,
-            isSaving = state.isSaving,
-            onClose = { state.resetAll() },
-            onUndo = { state.undo() },
-            onSave = { scope.launch { state.save() } },
-            modifier = Modifier.statusBarsPadding(),
-        )
+        Column(modifier = Modifier.fillMaxSize()) {
+            EditorTopBar(
+                canUndo = state.canUndo,
+                isSaving = state.isSaving,
+                onClose = { state.resetAll() },
+                onUndo = { state.undo() },
+                onSave = { state.openExportSheet() },
+                modifier = Modifier.statusBarsPadding(),
+            )
 
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-        ) {
-            val photo = state.photo
-            if (photo == null) {
-                PhotoLoadingPlaceholder(Modifier.fillMaxSize())
-            } else {
-                PhotoPreviewCard(
-                    photo = photo,
-                    effect = state.selectedEffect,
-                    intensity = state.intensity,
-                    showOriginal = state.showOriginal,
-                    onChangePhoto = onPickPhoto,
-                    onHoldChange = { state.holdOriginal(it) },
-                    modifier = Modifier.fillMaxSize(),
-                )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+            ) {
+                val photo = state.photo
+                if (photo == null) {
+                    PhotoLoadingPlaceholder(Modifier.fillMaxSize())
+                } else {
+                    PhotoPreviewCard(
+                        photo = photo,
+                        effect = state.selectedEffect,
+                        intensity = state.intensity,
+                        showOriginal = state.showOriginal,
+                        onChangePhoto = onPickPhoto,
+                        onHoldChange = { state.holdOriginal(it) },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
+
+            EffectsPanel(state = state)
+
+            EditorToolBar(
+                activeTool = state.activeTool,
+                hasEffect = state.selectedEffect != null,
+                onSelectTool = { tool ->
+                    if (tool == EditorTool.Effects) {
+                        state.activeTool = tool
+                    } else {
+                        state.showMessage("${tool.label} is coming soon")
+                    }
+                },
+                onBack = {
+                    val selected = state.selectedEffect
+                    if (selected != null) {
+                        state.toggleEffect(selected)
+                    } else {
+                        state.showMessage("Effects is the only tool in this build")
+                    }
+                },
+            )
         }
 
-        EffectsPanel(state = state)
-
-        EditorToolBar(
-            activeTool = state.activeTool,
-            hasEffect = state.selectedEffect != null,
-            onSelectTool = { tool ->
-                if (tool == EditorTool.Effects) {
-                    state.activeTool = tool
-                } else {
-                    state.showMessage("${tool.label} is coming soon")
-                }
-            },
-            onBack = {
-                val selected = state.selectedEffect
-                if (selected != null) {
-                    state.toggleEffect(selected)
-                } else {
-                    state.showMessage("Effects is the only tool in this build")
-                }
-            },
-        )
+        val plan = state.exportPlan
+        if (state.showExportSheet && state.photo != null && plan != null) {
+            ExportOptionsSheet(
+                options = state.exportOptions,
+                resolutions = state.resolutionOptions,
+                plan = plan,
+                onSelect = { state.updateExportOptions(it) },
+                onSave = { scope.launch { state.save() } },
+                onDismiss = { state.dismissExportSheet() },
+            )
+        }
     }
 }
 

@@ -65,51 +65,69 @@ class CpuHalationRenderer(private val params: HalationParams) : CpuEffect {
         val innerG = inner[1]
         val innerB = inner[2]
 
-        // ---------------------------------------------------------------- 1. bright-pass
+        // ---------------------------------------------------------------- 1-2. halo field
         // Exact recovered PREQUEL soft-knee max-channel formula (static report §6):
         //   f = 1 - t; f2 = s*f; br = max(r,g,b)
         //   soft = clamp(br-(f-f2),0,2*f2); soft = soft^2*0.25/(f2+1e-5)
         //   contrib = max(soft, br-f) / max(br,1e-5)
         // brightThreshold is the highlight floor (spec table); the recovered formula's "f = 1 - t"
         // refers to PREQUEL's internal darkness-space threshold, hence floor = t here.
-        val floorLvl = brightThreshold.coerceIn(0f, 1f)
-        val kneeWidth = max(softKnee * floorLvl, 1e-4f)
-        val bright = FloatArray(n) { i ->
-            val r = PixelMath.red(input[i])
-            val g = PixelMath.green(input[i])
-            val b = PixelMath.blue(input[i])
-            val br = max(r, max(g, b))
-            var soft = (br - (floorLvl - kneeWidth)).coerceIn(0f, 2f * kneeWidth)
-            soft = soft * soft * 0.25f / (kneeWidth + 1e-5f)
-            // Normalise by the available headroom above the floor => usable 0..1 halo mask.
-            val norm = max(1f - floorLvl, 0.05f)
-            (max(soft, br - floorLvl) / norm).coerceIn(0f, 1f)
-        }
-
-        // ---------------------------------------------------------------- 2. multi-scale halo
         // Blur pyramid: radii 8/28/64 · m (m = min(W,H)/1080), Blur control scales them;
         // weights 0.40/0.34/0.26. CPU uses O(n) box-blur approximation of the separable gaussian.
+        // The weighted field is accumulated in one plane inside scoped blocks so the bright-pass
+        // and per-scale planes can be collected before the next stage (full-resolution export).
+        val floorLvl = brightThreshold.coerceIn(0f, 1f)
+        val kneeWidth = max(softKnee * floorLvl, 1e-4f)
         val r1 = max(2, (8f * sc * blurScale + 0.5f).toInt())
         val r2 = max(4, (28f * sc * blurScale + 0.5f).toInt())
         val r3 = max(8, (64f * sc * blurScale + 0.5f).toInt())
-        val f1 = BoxBlur.blurFloatFast(bright, width, height, r1)
-        val f2 = BoxBlur.blurFloatFast(bright, width, height, r2)
-        val f3 = BoxBlur.blurFloatFast(bright, width, height, r3)
+        val field = run {
+            val bright = FloatArray(n) { i ->
+                val r = PixelMath.red(input[i])
+                val g = PixelMath.green(input[i])
+                val b = PixelMath.blue(input[i])
+                val br = max(r, max(g, b))
+                var soft = (br - (floorLvl - kneeWidth)).coerceIn(0f, 2f * kneeWidth)
+                soft = soft * soft * 0.25f / (kneeWidth + 1e-5f)
+                // Normalise by the available headroom above the floor => usable 0..1 halo mask.
+                val norm = max(1f - floorLvl, 0.05f)
+                (max(soft, br - floorLvl) / norm).coerceIn(0f, 1f)
+            }
+            // Accumulating in scale order keeps k = f1*0.40 + f2*0.34 + f3*0.26 bit-identical.
+            val acc = BoxBlur.blurFloatFast(bright, width, height, r1)
+            for (i in 0 until n) acc[i] *= 0.40f
+            run {
+                val f2 = BoxBlur.blurFloatFast(bright, width, height, r2)
+                for (i in 0 until n) acc[i] += f2[i] * 0.34f
+            }
+            run {
+                val f3 = BoxBlur.blurFloatFast(bright, width, height, r3)
+                for (i in 0 until n) acc[i] += f3[i] * 0.26f
+            }
+            acc
+        }
 
         // Edge gate: |luma - blur(luma)| isolates highlight boundaries. The plain blurred field
         // spills a broad wash across skin (measured against PREQUEL exports), so the halo is
-        // restricted to the edge band where the reference fringe actually lives.
-        val lumaPlane = FloatArray(n) { i ->
+        // restricted to the edge band where the reference fringe actually lives. The luma plane
+        // is gated in place; the blur result is scoped so it can be collected right after.
+        val edgeRadius = max(2, (16f * sc + 0.5f).toInt())
+        val edgeGate = FloatArray(n) { i ->
             PixelMath.luma(
                 PixelMath.red(input[i]),
                 PixelMath.green(input[i]),
                 PixelMath.blue(input[i]),
             )
         }
-        val edgeRadius = max(2, (16f * sc + 0.5f).toInt())
-        val lumaBlur = BoxBlur.blurFloatFast(lumaPlane, width, height, edgeRadius)
-        val edgeGate = FloatArray(n) { i ->
-            PixelMath.smoothstep(0.09f, 0.24f, kotlin.math.abs(lumaPlane[i] - lumaBlur[i]))
+        run {
+            val lumaBlur = BoxBlur.blurFloatFast(edgeGate, width, height, edgeRadius)
+            for (i in 0 until n) {
+                edgeGate[i] = PixelMath.smoothstep(
+                    0.09f,
+                    0.24f,
+                    kotlin.math.abs(edgeGate[i] - lumaBlur[i]),
+                )
+            }
         }
 
         // ---------------------------------------------------------------- 3. haze constants
@@ -137,12 +155,12 @@ class CpuHalationRenderer(private val params: HalationParams) : CpuEffect {
                 // ------------------------------------------------ additive tinted halo
                 // Low halo energy (fringe) = hue-tinted outer colour; high energy (core next to
                 // highlights) fades to the white-warm inner colour (PREQUEL look).
-                val field = f1[i] * 0.40f + f2[i] * 0.34f + f3[i] * 0.26f
-                val core = PixelMath.smoothstep(0.90f, 1.0f, field) * 0.35f
+                val haloField = field[i]
+                val core = PixelMath.smoothstep(0.90f, 1.0f, haloField) * 0.35f
                 val haloColR = outerR + (innerR - outerR) * core
                 val haloColG = outerG + (innerG - outerG) * core
                 val haloColB = outerB + (innerB - outerB) * core
-                val gatedField = field * edgeGate[i]
+                val gatedField = haloField * edgeGate[i]
                 val haloR = haloColR * gatedField
                 val haloG = haloColG * gatedField
                 val haloB = haloColB * gatedField
