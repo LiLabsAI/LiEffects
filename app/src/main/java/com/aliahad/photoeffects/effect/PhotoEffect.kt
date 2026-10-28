@@ -24,10 +24,17 @@ data class GpuProgram(
     val uniforms: Map<String, Float> = emptyMap(),
     /**
      * Extra asset-backed shader inputs: uniform shader name -> app asset path.
-     * Used by SENSUAL for the bundled PREQUEL `adj-Blur` mask (`uMask` -> `blurmask.jpg`);
-     * the preview binds each asset as a BitmapShader input.
+     * Used by SENSUAL for the bundled PREQUEL `adj-Blur` mask (`uMask` -> `blurmask.jpg`),
+     * KUJI for the paper frames (`uFrame` -> `kuji_frame_N.png`) and FOCAL for the LUT atlas
+     * (`uLut` -> `focal_luts.png`); the preview binds each asset as a BitmapShader input.
      */
     val extraShaderAssets: Map<String, String> = emptyMap(),
+    /**
+     * Extra shader inputs sampled in *bitmap pixel* space (identity local matrix) instead of
+     * normalized image space. FOCAL's LUT atlas is addressed by texel coordinates, unlike the
+     * image-sized mask/frame overlays.
+     */
+    val pixelSpaceShaders: Set<String> = emptySet(),
 )
 
 /** One pluggable effect: metadata + CPU/GPU renderers + a short parameter summary for the UI. */
@@ -139,6 +146,57 @@ object SensualEffectFactory {
             uniforms = params.toUniforms(),
             // PREQUEL's adj-Blur mask: sharp centre / blurred edges, bundled in assets.
             extraShaderAssets = mapOf("uMask" to "blurmask.jpg"),
+        ),
+        summary = params.summary(),
+    )
+}
+
+/** Builds one KUJI preset (shared AGSL shader + deterministic CPU mirror + paper frame). */
+object KujiEffectFactory {
+    fun create(
+        params: KujiParams,
+        extraCategories: Set<EffectCategory> = emptySet(),
+    ): PhotoEffect = PhotoEffect(
+        spec = EffectSpec(
+            id = params.id,
+            displayName = params.displayName,
+            familyId = KujiFamily.ID,
+            description = params.description,
+            defaultIntensity = params.defaultIntensity,
+            extraCategories = extraCategories,
+        ),
+        cpu = com.aliahad.photoeffects.effect.cpu.CpuKujiRenderer(params),
+        gpu = GpuProgram(
+            agslSource = KUJI_AGSL,
+            uniforms = params.toUniforms(),
+            // Recovered PREQUEL frame overlay, bound as `uniform shader uFrame`.
+            extraShaderAssets = mapOf(KujiUniforms.FRAME_SHADER to params.frameAsset),
+        ),
+        summary = params.summary(),
+    )
+}
+
+/** Builds one FOCAL preset (shared AGSL shader + deterministic CPU mirror + 33^3 LUT atlas). */
+object FocalEffectFactory {
+    fun create(
+        params: FocalParams,
+        extraCategories: Set<EffectCategory> = emptySet(),
+    ): PhotoEffect = PhotoEffect(
+        spec = EffectSpec(
+            id = params.id,
+            displayName = params.displayName,
+            familyId = FocalFamily.ID,
+            description = params.description,
+            defaultIntensity = params.defaultIntensity,
+            extraCategories = extraCategories,
+        ),
+        cpu = com.aliahad.photoeffects.effect.cpu.CpuFocalRenderer(params),
+        gpu = GpuProgram(
+            agslSource = FOCAL_AGSL,
+            uniforms = params.toUniforms(),
+            // Six recovered 33^3 LUTs packed in one atlas, bound as `uniform shader uLut`.
+            extraShaderAssets = mapOf(FocalUniforms.LUT_SHADER to "focal_luts.png"),
+            pixelSpaceShaders = setOf(FocalUniforms.LUT_SHADER),
         ),
         summary = params.summary(),
     )

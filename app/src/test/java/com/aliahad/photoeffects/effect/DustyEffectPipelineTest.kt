@@ -1,12 +1,17 @@
 package com.aliahad.photoeffects.effect
 
+import com.aliahad.photoeffects.effect.cpu.FocalLutData
+import com.aliahad.photoeffects.effect.cpu.FocalLutStore
 import com.aliahad.photoeffects.effect.cpu.PixelMath
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
+import java.io.File
+import javax.imageio.ImageIO
 import kotlin.math.abs
 
 /**
@@ -24,6 +29,21 @@ class DustyEffectPipelineTest {
 
     private val width = 96
     private val height = 64
+
+    /** FOCAL presets render through their bundled LUT atlas; inject it for every test. */
+    @Before
+    fun loadFocalLuts() {
+        FocalLutStore.clear()
+        val atlas = ImageIO.read(File("src/main/assets/focal_luts.png"))
+        val pixels = IntArray(atlas.width * atlas.height)
+        atlas.getRGB(0, 0, atlas.width, atlas.height, pixels, 0, atlas.width)
+        for (params in FocalFamily.presets) {
+            FocalLutStore.put(
+                params.id,
+                FocalLutData.fromAtlas(pixels, atlas.width, params.lutIndex),
+            )
+        }
+    }
 
     /** Deterministic synthetic "photo": gradients + saturated patches + skin-tone-ish block. */
     private fun testImage(): IntArray = IntArray(width * height) { i ->
@@ -279,7 +299,10 @@ class DustyEffectPipelineTest {
     @Test
     fun shelves_areFamilyFirstThenCategories() {
         assertEquals(
-            listOf("Dusty", "Halation", "Yesterday", "Sensual", "ForYou", "Trends", "New", "Films"),
+            listOf(
+                "Dusty", "Halation", "Yesterday", "Sensual", "Kuji", "Focal",
+                "ForYou", "Trends", "New", "Films",
+            ),
             EffectRegistry.shelves.map { it.id },
         )
         assertEquals("DUSTY", EffectRegistry.defaultShelf.title)
@@ -287,7 +310,9 @@ class DustyEffectPipelineTest {
         assertEquals(3, EffectRegistry.shelves[1].effects.size)
         assertEquals(1, EffectRegistry.shelves[2].effects.size) // YESTERDAY = single preset
         assertEquals(5, EffectRegistry.shelves[3].effects.size)
-        assertEquals(14, EffectRegistry.all.size)
+        assertEquals(5, EffectRegistry.shelves[4].effects.size) // KUJI
+        assertEquals(6, EffectRegistry.shelves[5].effects.size) // FOCAL
+        assertEquals(25, EffectRegistry.all.size)
         for (shelf in EffectRegistry.shelves) {
             assertTrue("shelf ${shelf.id} should not be empty", shelf.effects.isNotEmpty())
             for (effect in shelf.effects) {

@@ -4,12 +4,13 @@ package com.aliahad.photoeffects.effect
  * Effect catalogue, organised as shelves.
  *
  * Families own a render pipeline and appear first:
- *   DUSTY (5 presets) · HALATION (3 presets) · YESTERDAY (1 preset) · SENSUAL (5 presets)
+ *   DUSTY (5 presets) · HALATION (3 presets) · YESTERDAY (1 preset) · SENSUAL (5 presets) ·
+ *   KUJI (5 presets) · FOCAL (6 presets)
  * followed by PREQUEL-style category shelves cross-listing presets from all families:
  *   FOR YOU · TRENDS · NEW · FILMS
  *
  * RETUNING: edit the parameter rows in [DustyFamily] / [HalationFamily] / [YesterdayFamily] /
- * [SensualFamily] only.
+ * [SensualFamily] / [KujiFamily] / [FocalFamily] only.
  */
 object EffectRegistry {
 
@@ -19,6 +20,8 @@ object EffectRegistry {
         EffectFamily(HalationFamily.ID, "HALATION", HalationFamily.effects),
         EffectFamily(YesterdayFamily.ID, "YESTERDAY", YesterdayFamily.effects),
         EffectFamily(SensualFamily.ID, "SENSUAL", SensualFamily.effects),
+        EffectFamily(KujiFamily.ID, "KUJI", KujiFamily.effects),
+        EffectFamily(FocalFamily.ID, "FOCAL", FocalFamily.effects),
     )
 
     /** Every effect across all families (card world + thumbnails + lookups). */
@@ -65,6 +68,12 @@ object EffectRegistry {
 
     /** Number of SENSUAL variants (5). */
     val sensualPresetsCount: Int get() = SensualFamily.presets.size
+
+    /** Number of KUJI variants (5). */
+    val kujiPresetsCount: Int get() = KujiFamily.presets.size
+
+    /** Number of FOCAL variants (6). */
+    val focalPresetsCount: Int get() = FocalFamily.presets.size
 
     /** Preset applied when the user opens the DUSTY shelf. */
     val defaultEffect: PhotoEffect = DustyFamily.effects.first()

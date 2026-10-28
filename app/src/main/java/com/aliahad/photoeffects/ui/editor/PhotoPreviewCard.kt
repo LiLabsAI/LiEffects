@@ -120,7 +120,10 @@ fun PhotoPreviewCard(
         ) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
+                    // Fit the whole photo inside the card (PREQUEL does the same): a full-width
+                    // aspect-ratio box is taller than the card for portrait photos and gets
+                    // clipped, which cuts off the edges of edge-to-edge looks (e.g. KUJI's paper
+                    // frames and YESTERDAY's date stamp).
                     .aspectRatio(aspect)
                     .clip(RoundedCornerShape(14.dp)),
             ) {
@@ -273,6 +276,7 @@ private fun GpuOrCpuEffectImage(
         }
     }
     val matrix = remember { Matrix() }
+    val identity = remember { Matrix() }
 
     Canvas(modifier = modifier) {
         bitmapShader.setLocalMatrix(
@@ -283,7 +287,8 @@ private fun GpuOrCpuEffectImage(
         )
         shader.setInputShader(GpuEffectRenderer.CONTENT_SHADER, bitmapShader)
         for ((name, maskShader) in extraShaders) {
-            maskShader.setLocalMatrix(matrix)
+            // Frame/mask overlays follow the photo; the FOCAL LUT atlas stays in texel space.
+            maskShader.setLocalMatrix(if (name in program.pixelSpaceShaders) identity else matrix)
             shader.setInputShader(name, maskShader)
         }
         GpuEffectRenderer.applyUniforms(
