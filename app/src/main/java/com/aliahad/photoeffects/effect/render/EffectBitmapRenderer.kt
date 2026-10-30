@@ -2,6 +2,7 @@ package com.aliahad.photoeffects.effect.render
 
 import android.graphics.Bitmap
 import com.aliahad.photoeffects.effect.PhotoEffect
+import com.aliahad.photoeffects.effect.cpu.RenderCancellation
 import kotlin.math.roundToInt
 
 /**
@@ -25,13 +26,20 @@ object EffectBitmapRenderer {
         intensityPercent: Int,
         seed: Long,
         maxDimension: Int,
+        cancel: (() -> Boolean)? = null,
     ): Bitmap {
         val scaled = downscale(source, maxDimension)
         val width = scaled.width
         val height = scaled.height
         val pixels = IntArray(width * height)
         scaled.getPixels(pixels, 0, width, 0, 0, width, height)
-        val out = effect.cpu.apply(pixels, width, height, intensityPercent / 100f, seed)
+        val previous = RenderCancellation.current()
+        val out = try {
+            RenderCancellation.set(cancel)
+            effect.cpu.apply(pixels, width, height, intensityPercent / 100f, seed)
+        } finally {
+            RenderCancellation.set(previous)
+        }
         val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         result.setPixels(out, 0, width, 0, 0, width, height)
         if (scaled !== source) scaled.recycle()
@@ -47,7 +55,15 @@ object EffectBitmapRenderer {
         effect: PhotoEffect,
         intensityPercent: Int,
         seed: Long,
-    ): Bitmap = render(source, effect, intensityPercent, seed, maxOf(source.width, source.height))
+        cancel: (() -> Boolean)? = null,
+    ): Bitmap = render(
+        source,
+        effect,
+        intensityPercent,
+        seed,
+        maxOf(source.width, source.height),
+        cancel,
+    )
 
     /** Small deterministic render used for the Effects panel cards. */
     fun renderThumbnail(
@@ -56,7 +72,8 @@ object EffectBitmapRenderer {
         intensityPercent: Int = effect.defaultIntensity,
         seed: Long,
         maxDimension: Int = THUMBNAIL_MAX_DIMENSION,
-    ): Bitmap = render(source, effect, intensityPercent, seed, maxDimension)
+        cancel: (() -> Boolean)? = null,
+    ): Bitmap = render(source, effect, intensityPercent, seed, maxDimension, cancel)
 
     fun downscale(source: Bitmap, maxDimension: Int): Bitmap {
         val longest = maxOf(source.width, source.height)

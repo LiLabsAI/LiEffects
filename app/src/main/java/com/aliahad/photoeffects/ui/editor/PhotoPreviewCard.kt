@@ -1,12 +1,10 @@
 package com.aliahad.photoeffects.ui.editor
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.BitmapShader
-import android.graphics.Matrix
-import android.graphics.Paint
-import android.graphics.RuntimeShader
-import android.graphics.Shader
+import android.graphics.Canvas as AndroidCanvas
+import android.graphics.Paint as AndroidPaint
+import android.graphics.RadialGradient
+import android.graphics.Shader as AndroidShader
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -35,17 +33,17 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
@@ -55,15 +53,18 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aliahad.photoeffects.effect.DotMatrixDate
 import com.aliahad.photoeffects.effect.PhotoEffect
-import com.aliahad.photoeffects.effect.gpu.GpuEffectRenderer
+import com.aliahad.photoeffects.effect.gpu.GpuRenderGraph
 import com.aliahad.photoeffects.effect.render.EffectBitmapRenderer
 import com.aliahad.photoeffects.photo.LoadedPhoto
 import com.aliahad.photoeffects.ui.theme.EditorColors
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
@@ -84,8 +85,10 @@ fun PhotoPreviewCard(
     onChangePhoto: () -> Unit,
     onHoldChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    strengthLabel: String = "${intensity}%",
 ) {
     val bitmap = photo.bitmap
+    val backdrop = rememberBackdrop(bitmap)
     val aspect = bitmap.width.toFloat() / bitmap.height.toFloat()
     Box(
         modifier = modifier
@@ -95,25 +98,28 @@ fun PhotoPreviewCard(
             .semantics { contentDescription = "photo_preview" },
         contentAlignment = Alignment.Center,
     ) {
-        // Ambient backdrop: blurred copy of the same photo fills the letterbox area.
+        // Ambient backdrop: a tiny pre-scaled copy fills the letterbox area. Bilinear upscaling
+        // gives the same soft impression as a live 42.dp blur without a full-screen offscreen pass.
         Image(
-            bitmap = bitmap.asImageBitmap(),
+            bitmap = backdrop,
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier
                 .matchParentSize()
-                .blur(42.dp)
                 .alpha(0.28f),
         )
 
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(effect) {
+                .pointerInput(photo.id) {
                     detectTapGestures(onPress = {
                         onHoldChange(true)
-                        tryAwaitRelease()
-                        onHoldChange(false)
+                        try {
+                            tryAwaitRelease()
+                        } finally {
+                            onHoldChange(false)
+                        }
                     })
                 },
             contentAlignment = Alignment.Center,
@@ -222,7 +228,7 @@ fun PhotoPreviewCard(
             )
             Text(
                 text = if (effect != null) {
-                    "Hold to compare · ${intensity}%"
+                    "Hold to compare · $strengthLabel"
                 } else {
                     "Pick a preset below"
                 },
@@ -241,96 +247,114 @@ private fun GpuOrCpuEffectImage(
     modifier: Modifier = Modifier,
 ) {
     val bitmap = photo.bitmap
-    val shader = remember(effect.id) {
-        GpuEffectRenderer.compile(effect.gpu)
-    }
-    if (shader == null) {
-        CpuEffectImage(photo, effect, intensity, modifier)
-        return
-    }
-    val program = effect.gpu
-    // Extra asset-backed shader inputs (SENSUAL's bundled adj-Blur mask). If any asset fails to
-    // decode we fall back to the CPU path so the shader never runs with an unset shader input.
     val context = LocalContext.current
-    val extraShaders: Map<String, BitmapShader> = remember(program, context) {
-        val loaded = LinkedHashMap<String, BitmapShader>()
-        for ((name, asset) in program.extraShaderAssets) {
-            val bitmap = runCatching {
-                context.assets.open(asset).use { BitmapFactory.decodeStream(it) }
-            }.getOrNull() ?: return@remember emptyMap()
-            loaded[name] = BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
-        }
-        loaded
+    // Render at a stable internal resolution. Binding the graph to the animated card size caused
+    // a layout feedback loop and re-recorded every RenderNode on each panel-animation frame.
+    val renderSize = remember(photo.id, bitmap) { previewRenderSize(bitmap) }
+    val programs = remember(effect.gpu) { GpuRenderGraph.programs(effect.gpu) }
+    val topology = remember(programs) { GpuRenderGraph.topology(programs) }
+    val graph = remember(photo.id, bitmap, topology, renderSize) {
+        GpuRenderGraph.build(context, bitmap, programs, renderSize.width, renderSize.height)
     }
-    if (extraShaders.size != program.extraShaderAssets.size) {
+    DisposableEffect(graph) {
+        onDispose { graph?.release() }
+    }
+    if (graph == null) {
         CpuEffectImage(photo, effect, intensity, modifier)
         return
     }
-    val bitmapShader = remember(bitmap) {
-        BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
-    }
-    val paint = remember(effect.id) {
-        Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            isFilterBitmap = true
-            isDither = true
-        }
-    }
-    val matrix = remember { Matrix() }
-    val identity = remember { Matrix() }
+
+    // The stamp is rasterized once per size/date instead of emitting hundreds of radial-gradient
+    // circles on every frame. It shares the graph's internal coordinate system and is scaled with
+    // the photo during the final Canvas draw.
+    val stampLayer = rememberStampLayer(effect.stamp, renderSize.width, renderSize.height)
+    val stampPaint = remember(effect.stamp) { AndroidPaint() }
 
     Canvas(modifier = modifier) {
-        bitmapShader.setLocalMatrix(
-            matrix.apply {
-                reset()
-                setScale(size.width / bitmap.width, size.height / bitmap.height)
-            },
-        )
-        shader.setInputShader(GpuEffectRenderer.CONTENT_SHADER, bitmapShader)
-        for ((name, maskShader) in extraShaders) {
-            // Frame/mask overlays follow the photo; the FOCAL LUT atlas stays in texel space.
-            maskShader.setLocalMatrix(if (name in program.pixelSpaceShaders) identity else matrix)
-            shader.setInputShader(name, maskShader)
-        }
-        GpuEffectRenderer.applyUniforms(
-            shader = shader,
-            program = program,
-            intensity = intensity / 100f,
-            photoSeed = photo.seed,
-            widthPx = size.width,
-            heightPx = size.height,
-        )
-        paint.shader = shader
+        val scaleX = size.width / graph.width
+        val scaleY = size.height / graph.height
+        graph.update(programs, photo.seed, intensity / 100f)
         drawIntoCanvas { canvas ->
-            canvas.nativeCanvas.drawRect(0f, 0f, size.width, size.height, paint)
-        }
-        // Dot-matrix stamp overlay (YESTERDAY "Date" tool): same layout the CPU renderer
-        // rasterizes, fading with the intensity slider like the rest of the look.
-        val spec = effect.stamp
-        if (spec != null && intensity > 0) {
-            val dots = DotMatrixDate.layout(
-                spec.dateProvider(),
-                size.width.roundToInt(),
-                size.height.roundToInt(),
-            )
-            if (dots.isNotEmpty()) {
-                // Thin dots with a soft amber falloff (PREQUEL's stamp dots bloom slightly).
-                val core = Color(spec.colorRgb).copy(alpha = intensity / 100f)
-                val glow = core.copy(alpha = core.alpha * 0.35f)
-                val clear = core.copy(alpha = 0f)
-                for (dot in dots) {
-                    val center = Offset(dot.cx, dot.cy)
-                    val outer = dot.r * 1.45f
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(core, glow, clear),
-                            center = center,
-                            radius = outer,
-                        ),
-                        radius = outer,
-                        center = center,
-                    )
-                }
+            val native = canvas.nativeCanvas
+            val save = native.save()
+            native.scale(scaleX, scaleY)
+            native.drawRenderNode(graph.root)
+            if (stampLayer != null && intensity > 0 && effect.stampIntensity > 0f) {
+                stampPaint.alpha =
+                    ((intensity / 100f * effect.stampIntensity).coerceIn(0f, 1f) * 255f).roundToInt()
+                native.drawBitmap(stampLayer.bitmap, stampLayer.left, stampLayer.top, stampPaint)
             }
+            native.restoreToCount(save)
+        }
+    }
+}
+
+private const val PREVIEW_MAX_DIMENSION = 1600
+
+private fun previewRenderSize(bitmap: Bitmap): IntSize {
+    val longest = maxOf(bitmap.width, bitmap.height, 1)
+    val scale = minOf(1f, PREVIEW_MAX_DIMENSION.toFloat() / longest)
+    return IntSize(
+        (bitmap.width * scale).roundToInt().coerceAtLeast(1),
+        (bitmap.height * scale).roundToInt().coerceAtLeast(1),
+    )
+}
+
+private data class StampLayer(val bitmap: Bitmap, val left: Float, val top: Float)
+
+@Composable
+private fun rememberBackdrop(source: Bitmap): ImageBitmap = remember(source) {
+    val maxDimension = 96
+    val scale = maxDimension.toFloat() / maxOf(source.width, source.height, 1)
+    val width = (source.width * scale).roundToInt().coerceAtLeast(1)
+    val height = (source.height * scale).roundToInt().coerceAtLeast(1)
+    Bitmap.createScaledBitmap(source, width, height, true).asImageBitmap()
+}
+
+@Composable
+private fun rememberStampLayer(
+    spec: DotMatrixDate.StampSpec?,
+    width: Int,
+    height: Int,
+): StampLayer? {
+    if (spec == null || width <= 0 || height <= 0) return null
+    val parts = spec.dateProvider()
+    return remember(spec, parts, width, height) {
+        val dots = DotMatrixDate.layout(parts, width, height)
+        if (dots.isEmpty()) {
+            null
+        } else {
+            val pad = dots.maxOf { it.r * 1.45f } + 2f
+            val minX = dots.minOf { it.cx - it.r * 1.45f } - pad
+            val minY = dots.minOf { it.cy - it.r * 1.45f } - pad
+            val maxX = dots.maxOf { it.cx + it.r * 1.45f } + pad
+            val maxY = dots.maxOf { it.cy + it.r * 1.45f } + pad
+            val left = kotlin.math.floor(minX).toInt()
+            val top = kotlin.math.floor(minY).toInt()
+            val bitmapWidth = (kotlin.math.ceil(maxX).toInt() - left).coerceAtLeast(1)
+            val bitmapHeight = (kotlin.math.ceil(maxY).toInt() - top).coerceAtLeast(1)
+            val bitmap = Bitmap.createBitmap(bitmapWidth, bitmapHeight, Bitmap.Config.ARGB_8888)
+            val canvas = AndroidCanvas(bitmap)
+            val core = (0xFF000000L or spec.colorRgb).toInt()
+            val glow = (core and 0x00FFFFFF) or (89 shl 24)
+            val clear = core and 0x00FFFFFF
+            val paint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG)
+            for (dot in dots) {
+                val cx = dot.cx - left
+                val cy = dot.cy - top
+                val outer = dot.r * 1.45f
+                paint.shader = RadialGradient(
+                    cx,
+                    cy,
+                    outer,
+                    intArrayOf(core, glow, clear),
+                    floatArrayOf(0f, 0.35f, 1f),
+                    AndroidShader.TileMode.CLAMP,
+                )
+                canvas.drawCircle(cx, cy, outer, paint)
+            }
+            paint.shader = null
+            StampLayer(bitmap, left.toFloat(), top.toFloat())
         }
     }
 }
@@ -346,9 +370,17 @@ private fun CpuEffectImage(
     intensity: Int,
     modifier: Modifier = Modifier,
 ) {
-    val rendered by produceState<Bitmap?>(initialValue = null, photo.id, effect.id, intensity) {
+    val rendered by produceState<Bitmap?>(initialValue = null, photo.id, effect, intensity) {
+        val job = currentCoroutineContext()[Job]
         value = withContext(Dispatchers.Default) {
-            EffectBitmapRenderer.render(photo.bitmap, effect, intensity, photo.seed, maxDimension = 1080)
+            EffectBitmapRenderer.render(
+                photo.bitmap,
+                effect,
+                intensity,
+                photo.seed,
+                maxDimension = 1080,
+                cancel = { job?.isActive == false },
+            )
         }
     }
     val bitmap = rendered

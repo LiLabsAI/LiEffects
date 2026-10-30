@@ -35,6 +35,32 @@ data class GpuProgram(
      * image-sized mask/frame overlays.
      */
     val pixelSpaceShaders: Set<String> = emptySet(),
+    /** Optional preceding stage. Colour filters feed the selected effect. */
+    val inputProgram: GpuProgram? = null,
+    /** Stage strength when this program belongs to a composed edit. */
+    val intensityOverride: Float? = null,
+    /**
+     * Internal offscreen passes evaluated before this program (base first). Used by the filter
+     * pipeline to make directional focus separable; each pass consumes the previous layer.
+     */
+    val internalPasses: List<GpuPass> = emptyList(),
+    /**
+     * Shader inputs that must receive the stage's *input* layer rather than this program's
+     * content. The renderer binds them only when the stage input is the original bitmap.
+     */
+    val baseShaderInputs: Set<String> = emptySet(),
+)
+
+/**
+ * One internal offscreen pass. Unlike [GpuProgram] it has no composition/intensity semantics:
+ * internal passes run at full strength and are followed by the owning program.
+ */
+data class GpuPass(
+    val agslSource: String,
+    val uniforms: Map<String, Float> = emptyMap(),
+    val extraShaderAssets: Map<String, String> = emptyMap(),
+    val pixelSpaceShaders: Set<String> = emptySet(),
+    val baseShaderInputs: Set<String> = emptySet(),
 )
 
 /** One pluggable effect: metadata + CPU/GPU renderers + a short parameter summary for the UI. */
@@ -55,6 +81,8 @@ data class PhotoEffect(
      * caller's pixel buffers. Used to pick the largest safe export resolution.
      */
     val exportBytesPerPixel: Int = DEFAULT_EXPORT_BYTES_PER_PIXEL,
+    /** Independent effect strength for a date overlay in a composed filter + effect edit. */
+    val stampIntensity: Float = 1f,
 ) {
     val id: String get() = spec.id
     val displayName: String get() = spec.displayName

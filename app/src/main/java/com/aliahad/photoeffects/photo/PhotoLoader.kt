@@ -3,6 +3,7 @@ package com.aliahad.photoeffects.photo
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.ColorSpace
 import android.graphics.ImageDecoder
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
@@ -22,7 +23,12 @@ import kotlin.math.roundToInt
 object PhotoLoader {
 
     const val DEMO_ASSET = "demo_photo.jpg"
-    const val MAX_SOURCE_DIMENSION = 2400
+    /**
+     * Editor-only decode cap. The preview card is roughly 1080 px wide, so 1920 keeps detail
+     * while cutting the bitmap footprint by ~35% versus the old 2400 cap. Export re-decodes the
+     * original source at the planned size.
+     */
+    const val MAX_SOURCE_DIMENSION = 1920
 
     private var nextId = 1L
 
@@ -47,6 +53,9 @@ object PhotoLoader {
         var sourceHeight = 0
         val bitmap = ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri)) { decoder, info, _ ->
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            // The fitted grades are display-referred sRGB; normalize wide-gamut sources so the
+            // editor, GPU shaders and JPEG export all operate in the same working space.
+            decoder.setTargetColorSpace(ColorSpace.get(ColorSpace.Named.SRGB))
             val w = info.size.width
             val h = info.size.height
             sourceWidth = w
@@ -102,6 +111,7 @@ object PhotoLoader {
             ImageDecoder.createSource(context.contentResolver, uri),
         ) { decoder, info, _ ->
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            decoder.setTargetColorSpace(ColorSpace.get(ColorSpace.Named.SRGB))
             val targetWidth = width.coerceIn(1, info.size.width.coerceAtLeast(1))
             val targetHeight = height.coerceIn(1, info.size.height.coerceAtLeast(1))
             if (targetWidth != info.size.width || targetHeight != info.size.height) {

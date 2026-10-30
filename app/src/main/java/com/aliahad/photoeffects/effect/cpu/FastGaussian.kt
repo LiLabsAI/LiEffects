@@ -15,7 +15,8 @@ internal object FastGaussian {
     fun blurChannel(src: FloatArray, width: Int, height: Int, sigma: Float): FloatArray {
         if (sigma <= 0.05f || width <= 0 || height <= 0) return src.copyOf()
         val radius = kotlin.math.max(1, (sigma - 0.5f + 0.5f).toInt())
-        var acc = src.copyOf()
+        // The first pass reads the caller's plane; blurFloatFast never mutates its input.
+        var acc = src
         repeat(3) {
             acc = BoxBlur.blurFloatFast(acc, width, height, radius)
         }

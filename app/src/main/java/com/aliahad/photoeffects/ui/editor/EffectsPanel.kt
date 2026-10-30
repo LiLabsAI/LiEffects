@@ -1,6 +1,7 @@
 package com.aliahad.photoeffects.ui.editor
 
 import android.graphics.Bitmap
+import android.util.LruCache
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -57,6 +58,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -65,15 +70,27 @@ import androidx.compose.ui.unit.sp
 import com.aliahad.photoeffects.effect.EffectRegistry
 import com.aliahad.photoeffects.effect.EffectShelf
 import com.aliahad.photoeffects.effect.PhotoEffect
+import com.aliahad.photoeffects.effect.EditComposition
+import com.aliahad.photoeffects.effect.EditStage
+import com.aliahad.photoeffects.filter.FilterRegistry
 import com.aliahad.photoeffects.effect.render.EffectBitmapRenderer
 import com.aliahad.photoeffects.photo.LoadedPhoto
 import com.aliahad.photoeffects.ui.theme.EditorColors
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
+/** Shared thumbnail cache; keys include the photo, preset and the other composed stage. */
+private val thumbnailCache = object : LruCache<String, Bitmap>(24 * 1024 * 1024) {
+    override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
+}
+
 /**
- * Effects panel: category shelves + live effect cards + intensity row (spec §2.5).
+ * Effects / Filters panel: family shelves, live thumbnails, and independent controls.
  * Cards are thumbnails of the *current* photo rendered with each preset by the CPU mirror.
  */
 @Composable
@@ -82,8 +99,21 @@ fun EffectsPanel(
     modifier: Modifier = Modifier,
 ) {
     val photo = state.photo
-    val thumbnails = rememberEffectThumbnails(photo)
-    val selectedEffect = state.selectedEffect
+    val isFilters = state.activeTool == EditorTool.Filters
+    val catalogue = if (isFilters) FilterRegistry.all else EffectRegistry.all
+    val otherStage = if (isFilters) {
+        state.selectedEffect?.let { EditStage(it, state.selection?.intensity ?: it.defaultIntensity) }
+    } else {
+        state.selectedFilter?.let { EditStage(it, 100) }
+    }
+    // Scale the photo once per photo instead of once per thumbnail card.
+    val thumbnailSource = remember(photo?.id, photo?.bitmap) {
+        photo?.bitmap?.let {
+            EffectBitmapRenderer.downscale(it, EffectBitmapRenderer.THUMBNAIL_MAX_DIMENSION)
+        }
+    }
+    val thumbnails = rememberEffectThumbnails(photo, thumbnailSource, catalogue, otherStage, isFilters)
+    val selectedEffect = state.activePreset
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -91,19 +121,18 @@ fun EffectsPanel(
             .background(EditorColors.Panel),
     ) {
         CategoryChips(
-            activeId = state.activeShelfId,
-            shelves = EffectRegistry.shelves,
+            activeId = state.activeShelf.id,
+            shelves = if (isFilters) FilterRegistry.shelves else EffectRegistry.shelves,
             onSelect = { state.selectShelf(it) },
         )
         val effects = state.effects
         BoxWithConstraints(Modifier.fillMaxWidth()) {
-            // Every card of a shelf fits the screen at once (PREQUEL's variant strip shows all
-            // variants without scrolling); a shelf too wide for the 92.dp cap scrolls instead.
+            // Fit small variant shelves on screen; wider shelves scroll at the 92.dp cap.
             val edgePadding = 16.dp
             val gap = 10.dp
             val fitWidth =
                 (maxWidth - edgePadding * 2 - gap * (effects.size - 1)) / effects.size.coerceAtLeast(1)
-            val cardWidth = fitWidth.coerceIn(56.dp, 92.dp)
+            val cardWidth = fitWidth.coerceIn(48.dp, 92.dp)
             val cardHeight = cardWidth * 1.22f
             LazyRow(
                 modifier = Modifier.fillMaxWidth(),
@@ -117,7 +146,7 @@ fun EffectsPanel(
                         selected = selectedEffect?.id == effect.id,
                         cardWidth = cardWidth,
                         cardHeight = cardHeight,
-                        onClick = { state.toggleEffect(effect) },
+                        onClick = { if (isFilters) state.toggleFilter(effect) else state.toggleEffect(effect) },
                     )
                 }
             }
@@ -128,13 +157,38 @@ fun EffectsPanel(
             exit = fadeOut() + shrinkVertically(),
         ) {
             if (selectedEffect != null) {
-                IntensitySection(
-                    effect = selectedEffect,
-                    intensity = state.intensity,
-                    onValueChange = { state.setIntensity(it) },
-                    onDragStart = { state.beginIntensityDrag() },
-                    onDragFinished = { state.commitIntensityDrag() },
-                )
+                Column {
+                    if (isFilters) {
+                        Row(
+                            modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            for (control in state.filterControls) {
+                                Text(
+                                    text = control.label,
+                                    color = if (state.activeFilterControl == control) EditorColors.Accent else EditorColors.TextSecondary,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(50))
+                                        .clickable { state.filterControl = control }
+                                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                                        .semantics {
+                                            contentDescription = "filter_control_${control.name.lowercase()}"
+                                            selected = state.activeFilterControl == control
+                                        },
+                                )
+                            }
+                        }
+                    }
+                    IntensitySection(
+                        effect = selectedEffect,
+                        intensity = state.intensity,
+                        valueRange = if (isFilters) state.activeFilterControl.range else 0..100,
+                        onValueChange = { state.setIntensity(it) },
+                        onDragStart = { state.beginIntensityDrag() },
+                        onDragFinished = { state.commitIntensityDrag() },
+                    )
+                }
             }
         }
         Spacer(Modifier.height(2.dp))
@@ -142,18 +196,52 @@ fun EffectsPanel(
 }
 
 @Composable
-private fun rememberEffectThumbnails(photo: LoadedPhoto?): Map<String, Bitmap> {
-    val thumbnails by produceState<Map<String, Bitmap>>(emptyMap(), photo?.id) {
+private fun rememberEffectThumbnails(
+    photo: LoadedPhoto?,
+    thumbnailSource: Bitmap?,
+    catalogue: List<PhotoEffect>,
+    otherStage: EditStage?,
+    isFilters: Boolean,
+): Map<String, Bitmap> {
+    val thumbnails by produceState<Map<String, Bitmap>>(
+        emptyMap(),
+        photo?.id,
+        thumbnailSource,
+        catalogue,
+        otherStage,
+        isFilters,
+    ) {
+        value = emptyMap()
         val p = photo ?: return@produceState
-        value = withContext(Dispatchers.Default) {
-            EffectRegistry.all.associate { effect ->
-                effect.id to EffectBitmapRenderer.renderThumbnail(
-                    source = p.bitmap,
-                    effect = effect,
-                    intensityPercent = effect.defaultIntensity,
+        val source = thumbnailSource ?: p.bitmap
+        // Coalesce slider/selection churn before starting a expensive render pass.
+        if (otherStage != null) delay(90)
+        val job = currentCoroutineContext()[Job]
+        val otherKey = otherStage?.let {
+            "${it.effect.id}:${it.effect.gpu.uniforms.hashCode()}:${it.intensity}"
+        } ?: "none"
+        for (effect in catalogue) {
+            ensureActive()
+            val key = "${p.id}|$isFilters|${effect.id}|$otherKey"
+            val cached = thumbnailCache.get(key)
+            if (cached != null) {
+                value = value + (effect.id to cached)
+                continue
+            }
+            val rendered = withContext(Dispatchers.Default) {
+                val stage = EditStage(effect, effect.defaultIntensity)
+                val composed = if (isFilters) EditComposition.compose(stage, otherStage)
+                    else EditComposition.compose(otherStage, stage)
+                EffectBitmapRenderer.renderThumbnail(
+                    source = source,
+                    effect = requireNotNull(composed),
+                    intensityPercent = 100,
                     seed = p.seed,
+                    cancel = { job?.isActive == false },
                 )
             }
+            thumbnailCache.put(key, rendered)
+            value = value + (effect.id to rendered)
         }
     }
     return thumbnails
@@ -264,7 +352,9 @@ private fun EffectCard(
                 ),
         )
         Text(
-            text = effect.displayName,
+            text = if (cardWidth < 72.dp && '#' in effect.displayName) {
+                "#${effect.displayName.substringAfterLast('#').trim()}"
+            } else effect.displayName,
             color = EditorColors.TextPrimary,
             fontSize = if (cardWidth < 72.dp) 9.sp else 10.sp,
             fontWeight = FontWeight.SemiBold,
@@ -300,6 +390,7 @@ private fun EffectCard(
 private fun IntensitySection(
     effect: PhotoEffect,
     intensity: Int,
+    valueRange: IntRange,
     onValueChange: (Int) -> Unit,
     onDragStart: () -> Unit,
     onDragFinished: () -> Unit,
@@ -338,6 +429,7 @@ private fun IntensitySection(
         }
         IntensitySlider(
             value = intensity,
+            valueRange = valueRange,
             onValueChange = onValueChange,
             onDragStart = onDragStart,
             onDragFinished = onDragFinished,
@@ -349,7 +441,7 @@ private fun IntensitySection(
 }
 
 /**
- * Custom 0..100 slider with PREQUEL-style tick marks and orange thumb/progress.
+ * Recipe-ranged slider with tick marks; signed adjustments fill from the neutral centre.
  */
 @Composable
 fun IntensitySlider(
@@ -358,18 +450,19 @@ fun IntensitySlider(
     onDragStart: () -> Unit,
     onDragFinished: () -> Unit,
     modifier: Modifier = Modifier,
+    valueRange: IntRange = 0..100,
 ) {
     var widthPx by remember { mutableStateOf(1f) }
     fun valueFor(x: Float): Int {
         val pad = widthPx * 0.02f
         val usable = (widthPx - pad * 2f).coerceAtLeast(1f)
         val t = ((x - pad) / usable).coerceIn(0f, 1f)
-        return (t * 100f).roundToInt()
+        return (valueRange.first + t * (valueRange.last - valueRange.first)).roundToInt()
     }
     androidx.compose.foundation.Canvas(
         modifier = modifier
             .onSizeChanged { widthPx = it.width.toFloat() }
-            .pointerInput(widthPx) {
+            .pointerInput(widthPx, valueRange) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     onDragStart()
@@ -389,12 +482,27 @@ fun IntensitySlider(
                     }
                 }
             }
-            .semantics { contentDescription = "intensity_slider" },
+            .semantics {
+                contentDescription = "intensity_slider"
+                progressBarRangeInfo = ProgressBarRangeInfo(
+                    value.toFloat(), valueRange.first.toFloat()..valueRange.last.toFloat(),
+                    valueRange.last - valueRange.first - 1,
+                )
+                setProgress { target ->
+                    onDragStart()
+                    onValueChange(target.roundToInt().coerceIn(valueRange))
+                    onDragFinished()
+                    true
+                }
+            },
     ) {
         val pad = size.width * 0.02f
         val usable = (size.width - pad * 2f).coerceAtLeast(1f)
         val centerY = size.height * 0.32f
-        val valueX = pad + usable * (value.coerceIn(0, 100) / 100f)
+        fun fraction(v: Int) = (v.coerceIn(valueRange) - valueRange.first).toFloat() /
+            (valueRange.last - valueRange.first)
+        val valueX = pad + usable * fraction(value)
+        val neutralX = pad + usable * fraction(0)
 
         // Hairline track
         drawLine(
@@ -406,17 +514,19 @@ fun IntensitySlider(
         // Progress
         drawLine(
             color = EditorColors.Accent,
-            start = Offset(pad, centerY),
+            start = Offset(neutralX, centerY),
             end = Offset(valueX, centerY),
             strokeWidth = 1.5.dp.toPx(),
         )
-        // Tick marks (PREQUEL-style)
+        // Tick marks
         for (i in 0..20) {
             val tx = pad + usable * (i / 20f)
             val tickTop = centerY + 7.dp.toPx()
             val tickHeight = (if (i % 2 == 0) 7.dp else 4.dp).toPx()
             drawLine(
-                color = if (tx <= valueX + 0.5f) EditorColors.Accent else EditorColors.Track,
+                color = if (tx >= minOf(neutralX, valueX) - 0.5f && tx <= maxOf(neutralX, valueX) + 0.5f) {
+                    EditorColors.Accent
+                } else EditorColors.Track,
                 start = Offset(tx, tickTop),
                 end = Offset(tx, tickTop + tickHeight),
                 strokeWidth = 1.dp.toPx(),

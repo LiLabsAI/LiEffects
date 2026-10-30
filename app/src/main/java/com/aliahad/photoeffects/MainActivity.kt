@@ -14,6 +14,7 @@ import com.aliahad.photoeffects.effect.cpu.KujiFrameData
 import com.aliahad.photoeffects.effect.cpu.KujiFrameStore
 import com.aliahad.photoeffects.effect.FocalFamily
 import com.aliahad.photoeffects.effect.KujiFamily
+import com.aliahad.photoeffects.diagnostics.RenderDiagnostics
 import com.aliahad.photoeffects.ui.editor.EditorRoute
 import com.aliahad.photoeffects.ui.theme.PhotoEffectsTheme
 import kotlin.math.roundToInt
@@ -24,14 +25,21 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         // Keep the screen awake while editing so long editing sessions do not dim the preview.
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        loadBlurMaskAsync()
-        // Frames are needed by the very first thumbnail render pass, so decode them before the UI.
+        // All look assets are needed by the very first thumbnail pass. Decode them before the UI
+        // so CPU thumbnails and the GPU preview see the same data (historical async mask load
+        // raced the first render and produced mismatched Sensual thumbnails).
+        loadBlurMask()
         loadKujiFrames()
         loadFocalLuts()
         setContent {
             PhotoEffectsTheme {
                 EditorRoute()
             }
+        }
+        if (intent.getBooleanExtra("render_diagnostics", false)) {
+            Thread { RenderDiagnostics.run(applicationContext) }
+                .apply { isDaemon = true }
+                .start()
         }
     }
 
@@ -40,24 +48,21 @@ class MainActivity : ComponentActivity() {
      * [BlurMaskStore] used by the SENSUAL CPU pipeline (thumbnails + export). The GPU preview
      * binds the same asset directly as a shader input.
      */
-    private fun loadBlurMaskAsync() {
-        val appContext = applicationContext
-        Thread {
-            runCatching {
-                val bitmap = appContext.assets.open("blurmask.jpg").use {
-                    BitmapFactory.decodeStream(it)
-                } ?: return@Thread
-                val small = android.graphics.Bitmap.createScaledBitmap(bitmap, 256, 256, true)
-                val pixels = IntArray(256 * 256)
-                small.getPixels(pixels, 0, 256, 0, 0, 256, 256)
-                val values = FloatArray(pixels.size) { i ->
-                    ((pixels[i] shr 16) and 0xFF) / 255f
-                }
-                BlurMaskStore.current = BlurMaskData(values, 256, 256)
-                if (small !== bitmap) small.recycle()
-                bitmap.recycle()
+    private fun loadBlurMask() {
+        runCatching {
+            val bitmap = applicationContext.assets.open("blurmask.jpg").use {
+                BitmapFactory.decodeStream(it)
+            } ?: return
+            val small = android.graphics.Bitmap.createScaledBitmap(bitmap, 256, 256, true)
+            val pixels = IntArray(256 * 256)
+            small.getPixels(pixels, 0, 256, 0, 0, 256, 256)
+            val values = FloatArray(pixels.size) { i ->
+                ((pixels[i] shr 16) and 0xFF) / 255f
             }
-        }.apply { isDaemon = true }.start()
+            BlurMaskStore.current = BlurMaskData(values, 256, 256)
+            if (small !== bitmap) small.recycle()
+            bitmap.recycle()
+        }
     }
 
     /**

@@ -63,6 +63,21 @@ float hashF(float2 cell, float seed) {
     return fract1(sin(dot(c, float2(12.9898, 78.233))) * 43758.5453);
 }
 
+float vnoise(float2 p, float seed) {
+    float2 i = floor(p);
+    float2 f = p - i;
+    float2 u = f * f * (3.0 - 2.0 * f);
+    float a = hashF(i, seed);
+    float b = hashF(i + float2(1.0, 0.0), seed);
+    float c = hashF(i + float2(0.0, 1.0), seed);
+    float d = hashF(i + float2(1.0, 1.0), seed);
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+float fbm2(float2 p, float seed) {
+    return (vnoise(p, seed) * 2.0 + vnoise(p * 2.0, seed + 17.0)) / 3.0;
+}
+
 float3 sampleRgb(float2 p) {
     half4 h = content.eval(p);
     return float3(h.r, h.g, h.b);

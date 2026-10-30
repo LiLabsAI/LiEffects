@@ -11,6 +11,15 @@ internal object BoxBlur {
 
     fun blurArgb(src: IntArray, width: Int, height: Int, radius: Int): IntArray {
         if (radius < 1) return src
+        if (NativeBlur.available) {
+            val native = IntArray(src.size)
+            if (NativeBlur.blurArgb(src, native, width, height, radius)) return native
+        }
+        return blurArgbReference(src, width, height, radius)
+    }
+
+    internal fun blurArgbReference(src: IntArray, width: Int, height: Int, radius: Int): IntArray {
+        if (radius < 1) return src
         val tmp = IntArray(src.size)
         val out = IntArray(src.size)
         val window = 2 * radius + 1
@@ -90,6 +99,20 @@ internal object BoxBlur {
      * clamped edge replication, so cost is O(n) independent of radius.
      */
     fun blurFloatFast(src: FloatArray, width: Int, height: Int, radius: Int): FloatArray {
+        if (radius < 1 || width <= 0 || height <= 0) return src.copyOf()
+        if (NativeBlur.available) {
+            val native = FloatArray(src.size)
+            if (NativeBlur.blurFloatFast(src, native, width, height, radius)) return native
+        }
+        return blurFloatFastReference(src, width, height, radius)
+    }
+
+    internal fun blurFloatFastReference(
+        src: FloatArray,
+        width: Int,
+        height: Int,
+        radius: Int,
+    ): FloatArray {
         if (radius < 1 || width <= 0 || height <= 0) return src.copyOf()
         val window = 2 * radius + 1
         val inv = 1f / window

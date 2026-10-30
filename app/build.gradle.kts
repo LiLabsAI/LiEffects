@@ -9,6 +9,8 @@ android {
         version = release(37)
     }
 
+    ndkVersion = "29.0.13113456"
+
     defaultConfig {
         applicationId = "com.aliahad.photoeffects"
         minSdk = 36
@@ -17,6 +19,17 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        ndk {
+            // The target phone is arm64; keeping one ABI avoids shipping an unused toolchain.
+            abiFilters += "arm64-v8a"
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     buildTypes {

@@ -85,12 +85,13 @@ fun EditorScreen(
                 } else {
                     PhotoPreviewCard(
                         photo = photo,
-                        effect = state.selectedEffect,
-                        intensity = state.intensity,
+                        effect = state.renderEffect,
+                        intensity = 100,
                         showOriginal = state.showOriginal,
                         onChangePhoto = onPickPhoto,
                         onHoldChange = { state.holdOriginal(it) },
                         modifier = Modifier.fillMaxSize(),
+                        strengthLabel = state.strengthLabel,
                     )
                 }
             }
@@ -99,20 +100,20 @@ fun EditorScreen(
 
             EditorToolBar(
                 activeTool = state.activeTool,
-                hasEffect = state.selectedEffect != null,
+                hasEffect = state.activePreset != null,
                 onSelectTool = { tool ->
-                    if (tool == EditorTool.Effects) {
+                    if (tool == EditorTool.Effects || tool == EditorTool.Filters) {
                         state.activeTool = tool
                     } else {
                         state.showMessage("${tool.label} is coming soon")
                     }
                 },
                 onBack = {
-                    val selected = state.selectedEffect
+                    val selected = state.activePreset
                     if (selected != null) {
-                        state.toggleEffect(selected)
+                        state.clearActivePreset()
                     } else {
-                        state.showMessage("Effects is the only tool in this build")
+                        state.showMessage("Choose a ${if (state.activeTool == EditorTool.Filters) "filter" else "preset"} below")
                     }
                 },
             )

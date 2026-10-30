@@ -6,6 +6,7 @@ import android.util.Log
 import com.aliahad.photoeffects.effect.DustyUniforms
 import com.aliahad.photoeffects.effect.EffectSeed
 import com.aliahad.photoeffects.effect.GpuProgram
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Binds a [GpuProgram] (AGSL source + parameter uniforms) to Android's RuntimeShader /
@@ -20,14 +21,33 @@ object GpuEffectRenderer {
     const val CONTENT_SHADER = "content"
     private const val TAG = "PhotoEffectsGpu"
 
+    // AGSL compilation is one of the most expensive preview operations. Preview-layer changes
+    // (panel animation, image resize, slider change) rebuild RenderNodes but reuse the same shader
+    // sources; keep one compiled instance per source. The preview has one active graph at a time
+    // and composed stages use distinct sources, so uniforms/input bindings are updated safely.
+    private val shaders = ConcurrentHashMap<String, RuntimeShader>()
+    private val failedSources = ConcurrentHashMap.newKeySet<String>()
+
     /** Returns null when the device/AGSL compiler rejects the program (caller falls back to CPU). */
-    fun compile(program: GpuProgram): RuntimeShader? = try {
-        val shader = RuntimeShader(program.agslSource)
-        Log.d(TAG, "AGSL program compiled (GPU preview active)")
-        shader
-    } catch (t: Throwable) {
-        Log.w(TAG, "AGSL program failed to compile; using CPU preview fallback", t)
-        null
+    fun compile(program: GpuProgram): RuntimeShader? = compile(program.agslSource)
+
+    fun compile(agslSource: String): RuntimeShader? {
+        shaders[agslSource]?.let { return it }
+        if (agslSource in failedSources) return null
+        return try {
+            val created = RuntimeShader(agslSource)
+            val existing = shaders.putIfAbsent(agslSource, created)
+            if (existing == null) {
+                Log.d(TAG, "AGSL program compiled (GPU preview active)")
+                created
+            } else {
+                existing
+            }
+        } catch (t: Throwable) {
+            failedSources.add(agslSource)
+            Log.w(TAG, "AGSL program failed to compile; using CPU preview fallback", t)
+            null
+        }
     }
 
     /** Push all parameters for one frame. [widthPx]/[heightPx] are the drawn layer size. */
@@ -38,15 +58,41 @@ object GpuEffectRenderer {
         photoSeed: Long,
         widthPx: Float,
         heightPx: Float,
+    ) = applyUniforms(
+        shader,
+        program.uniforms,
+        program.intensityOverride,
+        intensity,
+        photoSeed,
+        widthPx,
+        heightPx,
+    )
+
+    /** Applies uniforms for an internal pass (which has no composition metadata). */
+    fun applyUniforms(
+        shader: RuntimeShader,
+        uniforms: Map<String, Float>,
+        intensityOverride: Float?,
+        intensity: Float,
+        photoSeed: Long,
+        widthPx: Float,
+        heightPx: Float,
     ) {
-        shader.setFloatUniform(DustyUniforms.INTENSITY, intensity.coerceIn(0f, 1f))
-        val variantSeed = (program.uniforms[DustyUniforms.SEED] ?: 0f).toInt()
+        shader.setFloatUniform(
+            DustyUniforms.INTENSITY,
+            ((intensityOverride ?: 1f) * intensity).coerceIn(0f, 1f),
+        )
+        val variantSeed = (uniforms[DustyUniforms.SEED] ?: 0f).toInt()
         shader.setFloatUniform(
             DustyUniforms.SEED,
             EffectSeed.of(photoSeed, variantSeed).toFloat(),
         )
-        shader.setFloatUniform(DustyUniforms.RESOLUTION, widthPx.coerceAtLeast(1f), heightPx.coerceAtLeast(1f))
-        for ((name, value) in program.uniforms) {
+        shader.setFloatUniform(
+            DustyUniforms.RESOLUTION,
+            widthPx.coerceAtLeast(1f),
+            heightPx.coerceAtLeast(1f),
+        )
+        for ((name, value) in uniforms) {
             if (name != DustyUniforms.SEED) shader.setFloatUniform(name, value)
         }
     }
