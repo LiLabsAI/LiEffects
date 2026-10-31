@@ -11,9 +11,11 @@ import com.aliahad.photoeffects.effect.EditComposition
 import com.aliahad.photoeffects.effect.EditStage
 import com.aliahad.photoeffects.effect.GpuProgram
 import com.aliahad.photoeffects.effect.PhotoEffect
+import com.aliahad.photoeffects.effect.gpu.GpuEffectRenderer
 import com.aliahad.photoeffects.effect.gpu.GpuReadback
 import com.aliahad.photoeffects.filter.FilterRegistry
 import com.aliahad.photoeffects.filter.FilterControl
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -118,6 +120,44 @@ class FilterGpuInstrumentedTest {
         }
     }
 
+    @Test fun sharpeningMatchesAtTransparentEdgesForEveryG7xVariant() {
+        width = 160
+        height = 107
+        transparentInput = true
+        for (preset in FilterRegistry.presets.filter { it.family == "G7X" }) {
+            for (sharpen in listOf(0, 20, 100)) {
+                val effect = FilterRegistry.withControls(preset.id, 100, sharpen)!!
+                assertGpuMatchesCpu(effect, "${preset.id} transparent sharpen=$sharpen")
+            }
+        }
+    }
+
+    @Test fun pointSharpenUsesTheResizedSourcePixelGrid() {
+        width = 193
+        height = 127
+        transparentInput = true
+        val original = Bitmap.createBitmap(source(), width, height, Bitmap.Config.ARGB_8888)
+        width = 160
+        height = 107
+        try {
+            val scaled = Bitmap.createScaledBitmap(original, width, height, true)
+            val pixels = IntArray(width * height)
+            scaled.getPixels(pixels, 0, width, 0, 0, width, height)
+            scaled.recycle()
+            val effect = FilterRegistry.withControls("g7x_1", 100, 100)!!
+            assertPixelsMatchCpu(effect, "resized transparent sharpen", pixels, original, alphaLimit = 2)
+        } finally {
+            original.recycle()
+        }
+    }
+
+    @Test fun compiledProgramsHaveIndependentMutableBindings() {
+        val program = FilterRegistry.byId("g7x_1")!!.gpu
+        val first = checkNotNull(GpuEffectRenderer.compile(program))
+        val second = checkNotNull(GpuEffectRenderer.compile(program))
+        assertNotSame("Each graph must own its uniforms and child bindings", first, second)
+    }
+
     private fun assertGpuMatchesCpu(effect: PhotoEffect, label: String) {
         val src = source()
         // Canonicalize the bitmap's 8-bit premultiplied storage before either backend reads it.
@@ -125,14 +165,24 @@ class FilterGpuInstrumentedTest {
             bitmap.getPixels(src, 0, width, 0, 0, width, height)
             bitmap.recycle()
         }
+        assertPixelsMatchCpu(effect, label, src)
+    }
+
+    private fun assertPixelsMatchCpu(
+        effect: PhotoEffect,
+        label: String,
+        src: IntArray,
+        bitmapSource: Bitmap? = null,
+        alphaLimit: Int = 1,
+    ) {
         val expected = effect.cpu.apply(src, width, height, 1f, 42L)
-        val actual = renderGpu(effect.gpu, src)
+        val actual = renderGpu(effect.gpu, src, bitmapSource)
         var sum = 0L
         var max = 0
         for (i in expected.indices) {
             val alpha = expected[i] ushr 24
             // Bilinear texture sampling can quantize coverage by one 8-bit level.
-            assertTrue("$label alpha at $i", abs(alpha - (actual[i] ushr 24)) <= 1)
+            assertTrue("$label alpha at $i", abs(alpha - (actual[i] ushr 24)) <= alphaLimit)
             for (shift in intArrayOf(0, 8, 16)) {
                 // ImageReader gives premultiplied RGBA; CPU renderers return straight ARGB.
                 val channel = (((expected[i] ushr shift) and 255) * alpha + 127) / 255
@@ -146,11 +196,11 @@ class FilterGpuInstrumentedTest {
         assertTrue("$label GPU/CPU mean=$mean max=$max", mean < 0.8 && max <= 4)
     }
 
-    private fun renderGpu(program: GpuProgram, pixels: IntArray): IntArray {
+    private fun renderGpu(program: GpuProgram, pixels: IntArray, bitmapSource: Bitmap? = null): IntArray {
         // AndroidJUnitRunner can disable hardware output in headless environments.
         val wasDrawingEnabled = HardwareRenderer.isDrawingEnabled()
         HardwareRenderer.setDrawingEnabled(true)
-        val source = Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
+        val source = bitmapSource ?: Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
         try {
             return checkNotNull(
                 GpuReadback.render(
@@ -164,7 +214,7 @@ class FilterGpuInstrumentedTest {
                 ),
             ) { "GPU readback produced no image" }
         } finally {
-            source.recycle()
+            if (bitmapSource == null) source.recycle()
             HardwareRenderer.setDrawingEnabled(wasDrawingEnabled)
         }
     }

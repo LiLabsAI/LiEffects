@@ -49,6 +49,19 @@ class ExportBudgetTest {
     }
 
     @Test
+    fun rounded_dimensions_never_exceed_the_pixel_budget() {
+        for (limit in listOf(500_000, 1_500_000, 3_834_792, 4_880_644)) {
+            for ((width, height) in listOf(4000 to 3000, 3000 to 4000, 1600 to 2399)) {
+                val (w, h) = ExportBudget.targetSize(width, height, limit)
+                assertTrue("$w x $h exceeds $limit", w.toLong() * h <= limit)
+                assertTrue(w <= width && h <= height)
+            }
+        }
+        assertEquals(100 to 1, ExportBudget.targetSize(5000, 1, 100))
+        assertEquals(1 to 100, ExportBudget.targetSize(1, 5000, 100))
+    }
+
+    @Test
     fun tiny_heap_falls_back_to_the_previous_export_resolution() {
         val pixels = ExportBudget.maxPixels(EffectRegistry.byId("sensual_1"), 128L * 1024 * 1024)
         assertEquals(ExportBudget.MIN_PIXELS, pixels)

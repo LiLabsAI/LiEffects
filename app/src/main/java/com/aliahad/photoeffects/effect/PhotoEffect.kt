@@ -51,6 +51,12 @@ data class GpuProgram(
      * content. The renderer binds them only when the stage input is the original bitmap.
      */
     val baseShaderInputs: Set<String> = emptySet(),
+    /** Base inputs sampled at exact texels, for integer kernels such as sharpening. */
+    val nearestBaseShaderInputs: Set<String> = emptySet(),
+    /** Original coverage only: every stage preserves center alpha, so this is valid at any stage. */
+    val originalAlphaShaderInputs: Set<String> = emptySet(),
+    /** Optional float set once from the source bitmap: 1 when it has no alpha channel. */
+    val opaqueSourceUniform: String? = null,
 )
 
 /**
@@ -64,6 +70,9 @@ data class GpuPass(
     val extraShaderAssets: Map<String, String> = emptyMap(),
     val pixelSpaceShaders: Set<String> = emptySet(),
     val baseShaderInputs: Set<String> = emptySet(),
+    val nearestBaseShaderInputs: Set<String> = emptySet(),
+    val originalAlphaShaderInputs: Set<String> = emptySet(),
+    val opaqueSourceUniform: String? = null,
 )
 
 /** One pluggable effect: metadata + CPU/GPU renderers + a short parameter summary for the UI. */
@@ -80,8 +89,8 @@ data class PhotoEffect(
      */
     val stamp: DotMatrixDate.StampSpec? = null,
     /**
-     * Rough peak Java-heap cost of one CPU export render in bytes per pixel, including the
-     * caller's pixel buffers. Used to pick the largest safe export resolution.
+     * Conservative peak render working set in bytes per pixel, including the caller's pixel
+     * buffers and temporary native/JNI allocations. Bounds the planned export resolution.
      */
     val exportBytesPerPixel: Int = DEFAULT_EXPORT_BYTES_PER_PIXEL,
     /** Independent effect strength for a date overlay in a composed filter + effect edit. */
@@ -117,7 +126,7 @@ object DustyEffectFactory {
             uniforms = params.toUniforms(),
         ),
         summary = params.summary(),
-        exportBytesPerPixel = 28,
+        exportBytesPerPixel = 32,
     )
 }
 
@@ -141,7 +150,7 @@ object HalationEffectFactory {
             uniforms = params.toUniforms(),
         ),
         summary = params.summary(),
-        exportBytesPerPixel = 28,
+        exportBytesPerPixel = 32,
     )
 }
 
@@ -166,7 +175,7 @@ object YesterdayEffectFactory {
         ),
         summary = params.summary(),
         stamp = params.stampSpec(),
-        exportBytesPerPixel = 44,
+        exportBytesPerPixel = 48,
     )
 }
 
@@ -192,7 +201,7 @@ object SensualEffectFactory {
             extraShaderAssets = mapOf("uMask" to "blurmask.jpg"),
         ),
         summary = params.summary(),
-        exportBytesPerPixel = 56,
+        exportBytesPerPixel = 60,
     )
 }
 

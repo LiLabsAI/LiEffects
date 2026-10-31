@@ -46,6 +46,12 @@ uniform float uScratches;
 uniform float uTexture;
 uniform float uVignette;
 
+// RuntimeShader child colors are premultiplied; effect math uses straight RGB like the CPU.
+float3 sourceStraight(half4 h) {
+    return h.a > 0.0 ? float3(float(h.r), float(h.g), float(h.b)) / float(h.a)
+        : float3(0.0);
+}
+
 float fract1(float x) { return x - floor(x); }
 
 // ---------------------------------------------------------------- lattice noise
@@ -85,12 +91,12 @@ float softLightFilm(float base, float b) {
 
 float3 sampleRgb(float2 p) {
     half4 h = content.eval(p);
-    return float3(h.r, h.g, h.b);
+    return sourceStraight(h);
 }
 
 float sampleLuma(float2 p) {
     half4 h = content.eval(p);
-    return dot(float3(h.r, h.g, h.b), float3(0.2126, 0.7152, 0.0722));
+    return dot(sourceStraight(h), float3(0.2126, 0.7152, 0.0722));
 }
 
 half4 main(float2 fragCoord) {
@@ -103,7 +109,7 @@ half4 main(float2 fragCoord) {
     float2 res = max(uResolution, float2(1.0, 1.0));
     float2 uv = fragCoord / res;
     float sc = min(res.x, res.y) / 1080.0;
-    float3 src = float3(srcH.r, srcH.g, srcH.b);
+    float3 src = sourceStraight(srcH);
 
     // ------------------------------------------------------------------ 2a. aberration
     float3 aber = src;
@@ -231,6 +237,7 @@ half4 main(float2 fragCoord) {
 
     // ------------------------------------------------------------------ 9. intensity blend
     float3 outc = mix(src, clamp(c, 0.0, 1.0), t);
-    return half4(half(outc.x), half(outc.y), half(outc.z), srcH.a);
+    float alpha = float(srcH.a);
+    return half4(half(outc.x * alpha), half(outc.y * alpha), half(outc.z * alpha), srcH.a);
 }
 """

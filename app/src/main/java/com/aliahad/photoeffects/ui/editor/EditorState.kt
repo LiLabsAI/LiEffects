@@ -29,6 +29,7 @@ import com.aliahad.photoeffects.photo.LoadedPhoto
 import com.aliahad.photoeffects.photo.PhotoLoader
 import com.aliahad.photoeffects.photo.PhotoSaver
 import com.aliahad.photoeffects.photo.ResolutionOption
+import kotlinx.coroutines.CancellationException
 
 /** Bottom tool tabs. Effects and Filters are independent, composable selections. */
 enum class EditorTool(val label: String) {
@@ -52,40 +53,49 @@ data class FilterSelection(
     val highlights: Int = 0, val shadows: Int = 0,
     val aberration: Int = 0,
 )
-private data class EditSnapshot(
-    val effect: EffectSelection?,
-    val filter: FilterSelection?,
-    val adjust: AdjustParams,
-)
 
 /**
  * Editor state holder: photo, selected effect, intensity, undo history, save flow.
  *
- * Plain Compose state (no ViewModel) so it stays simple; all bitmap work happens off the main
+ * Retained by EditorViewModel; all bitmap work happens off the main
  * thread in [PhotoLoader] / [PhotoSaver] / [EffectBitmapRenderer].
  */
-class EditorState(private val context: Context) {
+class EditorState internal constructor(
+    private val context: Context,
+    restoredSession: EditorSession? = null,
+) {
+    private val restored = restoredSession
+    private var sessionSourceUri = restored?.sourceUri
 
     var photo by mutableStateOf<LoadedPhoto?>(null)
         private set
+    private val photoLoads = LatestPhotoLoad<LoadedPhoto> { discarded ->
+        discarded.bitmap.takeIf { it !== photo?.bitmap && !it.isRecycled }?.recycle()
+    }
     var isLoadingPhoto by mutableStateOf(true)
         private set
-    var selection by mutableStateOf<EffectSelection?>(null)
+    var selection by mutableStateOf(restored?.edit?.effect)
         private set
-    var filterSelection by mutableStateOf<FilterSelection?>(null)
+    var filterSelection by mutableStateOf(restored?.edit?.filter)
         private set
-    var adjustParams by mutableStateOf(AdjustParams())
+    var adjustParams by mutableStateOf(restored?.edit?.adjust ?: AdjustParams())
         private set
-    var adjustCategory by mutableStateOf(AdjustCategory.Light)
-    var adjustControl by mutableStateOf(AdjustControl.Exposure)
-    var hslBand by mutableStateOf(HslBand.Red)
-    var hslComponent by mutableStateOf(HslComponent.Hue)
-    var filterControl by mutableStateOf(FilterControl.Strength)
-    var activeFilterShelfId by mutableStateOf(FilterRegistry.defaultShelf.id)
+    var adjustCategory by mutableStateOf(restored?.adjustCategory ?: AdjustCategory.Light)
+    var adjustControl by mutableStateOf(restored?.adjustControl ?: AdjustControl.Exposure)
+    var hslBand by mutableStateOf(restored?.hslBand ?: HslBand.Red)
+    var hslComponent by mutableStateOf(restored?.hslComponent ?: HslComponent.Hue)
+    var filterControl by mutableStateOf(restored?.filterControl ?: FilterControl.Strength)
+    var activeFilterShelfId by mutableStateOf(
+        restored?.filterShelf?.takeIf { FilterRegistry.shelfById(it) != null }
+            ?: FilterRegistry.defaultShelf.id,
+    )
     /** Currently selected Effects-panel shelf (family or category); see [EffectRegistry.shelves]. */
-    var activeShelfId by mutableStateOf(EffectRegistry.defaultShelf.id)
-    var activeTool by mutableStateOf(EditorTool.Effects)
-    var panelStage by mutableStateOf(PanelStage.Categories)
+    var activeShelfId by mutableStateOf(
+        restored?.effectShelf?.takeIf { EffectRegistry.shelfById(it) != null }
+            ?: EffectRegistry.defaultShelf.id,
+    )
+    var activeTool by mutableStateOf(restored?.tool ?: EditorTool.Effects)
+    var panelStage by mutableStateOf(restored?.panel ?: PanelStage.Categories)
         private set
     var showOriginal by mutableStateOf(false)
         private set
@@ -96,9 +106,9 @@ class EditorState(private val context: Context) {
     var message by mutableStateOf<String?>(null)
         private set
     /** Resolution / quality / metadata picked in the export sheet. */
-    var exportOptions by mutableStateOf(ExportSettings.load(context))
+    var exportOptions by mutableStateOf(restored?.exportOptions ?: ExportSettings.load(context))
         private set
-    var showExportSheet by mutableStateOf(false)
+    var showExportSheet by mutableStateOf(restored?.exportSheet ?: false)
         private set
 
     val resolutionOptions: List<ResolutionOption>
@@ -112,7 +122,7 @@ class EditorState(private val context: Context) {
         }
 
     /** Undo stores both selections, so switching tools never drops the other edit. */
-    private val history = ArrayDeque<EditSnapshot>()
+    private val history = EditHistory(restored?.history.orEmpty())
     private var dragSnapshot: EditSnapshot? = null
 
     val selectedEffect: PhotoEffect?
@@ -180,7 +190,7 @@ class EditorState(private val context: Context) {
         get() = filterControl.takeIf { it in filterControls } ?: filterControls.first()
 
     val canUndo: Boolean
-        get() = history.isNotEmpty()
+        get() = history.canUndo
 
     val activeShelf: EffectShelf
         get() = if (activeTool == EditorTool.Filters) {
@@ -191,55 +201,57 @@ class EditorState(private val context: Context) {
         get() = activeShelf.effects
 
     suspend fun bootstrap() {
-        isLoadingPhoto = true
-        runCatching { PhotoLoader.loadDemo(context) }
-            .onSuccess { photo = it }
-            .onFailure { message = "Could not load demo photo" }
-        isLoadingPhoto = false
+        if (photo != null) return
+        loadPhoto(sessionSourceUri?.let(Uri::parse), restoreEdits = true)
     }
 
     suspend fun loadUserPhoto(uri: Uri) {
-        isLoadingPhoto = true
-        runCatching { PhotoLoader.loadFromUri(context, uri) }
-            .onSuccess {
-                photo = it
-                selection = null
-                filterSelection = null
-                adjustParams = AdjustParams()
-                adjustCategory = AdjustCategory.Light
-                adjustControl = AdjustControl.Exposure
-                hslBand = HslBand.Red
-                hslComponent = HslComponent.Hue
-                dragSnapshot = null
-                history.clear()
-                activeShelfId = EffectRegistry.defaultShelf.id
-                activeFilterShelfId = FilterRegistry.defaultShelf.id
-                resetExportResolution()
-                panelStage = PanelStage.Categories
-            }
-            .onFailure { message = "Could not load that photo" }
-        isLoadingPhoto = false
+        // A transient picker grant may need refreshing after process recreation. Reopening
+        // that same source should recover its edits rather than silently clearing them.
+        loadPhoto(uri, restoreEdits = photo == null && sessionSourceUri == uri.toString())
     }
 
     suspend fun reloadDemo() {
-        isLoadingPhoto = true
-        runCatching { PhotoLoader.loadDemo(context) }
-            .onSuccess {
-                photo = it
-                selection = null
-                filterSelection = null
-                adjustParams = AdjustParams()
-                adjustCategory = AdjustCategory.Light
-                adjustControl = AdjustControl.Exposure
-                hslBand = HslBand.Red
-                hslComponent = HslComponent.Hue
-                dragSnapshot = null
-                history.clear()
-                resetExportResolution()
-                panelStage = PanelStage.Categories
-            }
-            .onFailure { message = "Could not load demo photo" }
-        isLoadingPhoto = false
+        loadPhoto(null, restoreEdits = false)
+    }
+
+    private suspend fun loadPhoto(uri: Uri?, restoreEdits: Boolean) {
+        photoLoads.run(
+            decode = {
+                if (uri == null) PhotoLoader.loadDemo(context)
+                else PhotoLoader.loadFromUri(context, uri)
+            },
+            onLoaded = { decoded ->
+                photo = decoded
+                sessionSourceUri = decoded.sourceUri
+                if (!restoreEdits) {
+                    selection = null
+                    filterSelection = null
+                    adjustParams = AdjustParams()
+                    adjustCategory = AdjustCategory.Light
+                    adjustControl = AdjustControl.Exposure
+                    hslBand = HslBand.Red
+                    hslComponent = HslComponent.Hue
+                    dragSnapshot = null
+                    adjustDragging = false
+                    history.clear()
+                    activeShelfId = EffectRegistry.defaultShelf.id
+                    activeFilterShelfId = FilterRegistry.defaultShelf.id
+                    resetExportResolution()
+                    panelStage = PanelStage.Categories
+                    showExportSheet = false
+                }
+            },
+            onFailure = { failure ->
+                message = when {
+                    failure is OutOfMemoryError -> "Not enough memory to load that photo. Try another photo."
+                    restoreEdits && uri != null ->
+                        "Could not reopen your photo. Choose it again to continue."
+                    else -> "Could not load that photo"
+                }
+            },
+            onLoadingChanged = { isLoadingPhoto = it },
+        )
     }
 
     fun selectTool(tool: EditorTool) {
@@ -319,8 +331,7 @@ class EditorState(private val context: Context) {
     }
 
     fun undo() {
-        if (history.isEmpty()) return
-        val previous = history.removeLast()
+        val previous = history.pop() ?: return
         selection = previous.effect
         filterSelection = previous.filter
         adjustParams = previous.adjust
@@ -378,16 +389,20 @@ class EditorState(private val context: Context) {
         showExportSheet = false
         isSaving = true
         val effect = renderEffect
-        runCatching { PhotoSaver.save(context, currentPhoto, effect, 100, exportOptions) }
-            .onSuccess { result ->
-                message = if (result.success) {
-                    "Saved ${result.width}×${result.height} to ${result.displayPath}"
-                } else {
-                    "Save failed: ${result.error ?: "unknown error"}"
-                }
+        try {
+            val result = PhotoSaver.save(context, currentPhoto, effect, 100, exportOptions)
+            message = if (result.success) {
+                "Saved ${result.width}×${result.height} to ${result.displayPath}"
+            } else {
+                "Save failed: ${result.error ?: "unknown error"}"
             }
-            .onFailure { message = "Save failed: ${it.message ?: "unknown error"}" }
-        isSaving = false
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            message = "Save failed: ${failure.message ?: "unknown error"}"
+        } finally {
+            isSaving = false
+        }
     }
 
     fun showMessage(text: String) {
@@ -405,9 +420,30 @@ class EditorState(private val context: Context) {
     private fun snapshot() = EditSnapshot(selection, filterSelection, adjustParams)
 
     private fun recordHistory(snapshot: EditSnapshot) {
-        history.addLast(snapshot)
-        // Keep the stack bounded; the editor only needs a few steps of history.
-        while (history.size > 24) history.removeFirst()
+        history.record(snapshot)
+    }
+
+    internal fun session(): EditorSession {
+        val current = snapshot()
+        // Saving state midway through a drag must retain the corresponding Undo step.
+        val undo = dragSnapshot?.takeIf { it != current }?.let { history.entries + it }
+            ?: history.entries
+        return EditorSession(
+            sourceUri = sessionSourceUri,
+            edit = current,
+            history = undo.takeLast(EditHistory.MAX_ENTRIES),
+            tool = activeTool,
+            panel = panelStage,
+            effectShelf = activeShelfId,
+            filterShelf = activeFilterShelfId,
+            filterControl = filterControl,
+            adjustCategory = adjustCategory,
+            adjustControl = adjustControl,
+            hslBand = hslBand,
+            hslComponent = hslComponent,
+            exportOptions = exportOptions,
+            exportSheet = showExportSheet,
+        )
     }
 
     /** New photo, fresh export: back to the source-size default (PREQUEL's "large as source"). */

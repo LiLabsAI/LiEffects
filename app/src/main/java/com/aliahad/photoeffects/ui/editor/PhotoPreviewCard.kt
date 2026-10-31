@@ -62,10 +62,8 @@ import com.aliahad.photoeffects.effect.gpu.GpuRenderGraph
 import com.aliahad.photoeffects.effect.render.EffectBitmapRenderer
 import com.aliahad.photoeffects.photo.LoadedPhoto
 import com.aliahad.photoeffects.ui.theme.EditorColors
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 /**
@@ -133,11 +131,12 @@ fun PhotoPreviewCard(
                     .aspectRatio(aspect)
                     .clip(RoundedCornerShape(14.dp)),
             ) {
-                if (effect != null && !showOriginal) {
+                if (effect != null) {
                     GpuOrCpuEffectImage(
                         photo = photo,
                         effect = effect,
                         intensity = intensity,
+                        showOriginal = showOriginal,
                         modifier = Modifier.fillMaxSize(),
                     )
                 } else {
@@ -244,6 +243,7 @@ private fun GpuOrCpuEffectImage(
     photo: LoadedPhoto,
     effect: PhotoEffect,
     intensity: Int,
+    showOriginal: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val bitmap = photo.bitmap
@@ -260,7 +260,18 @@ private fun GpuOrCpuEffectImage(
         onDispose { graph?.release() }
     }
     if (graph == null) {
-        CpuEffectImage(photo, effect, intensity, modifier)
+        // Keep the CPU producer mounted as well, so comparison does not restart rendering.
+        Box(modifier) {
+            CpuEffectImage(photo, effect, intensity, Modifier.fillMaxSize())
+            if (showOriginal) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
         return
     }
 
@@ -270,21 +281,32 @@ private fun GpuOrCpuEffectImage(
     val stampLayer = rememberStampLayer(effect.stamp, renderSize.width, renderSize.height)
     val stampPaint = remember(effect.stamp) { AndroidPaint() }
 
-    Canvas(modifier = modifier) {
-        val scaleX = size.width / graph.width
-        val scaleY = size.height / graph.height
-        graph.update(programs, photo.seed, intensity / 100f)
-        drawIntoCanvas { canvas ->
-            val native = canvas.nativeCanvas
-            val save = native.save()
-            native.scale(scaleX, scaleY)
-            native.drawRenderNode(graph.root)
-            if (stampLayer != null && intensity > 0 && effect.stampIntensity > 0f) {
-                stampPaint.alpha =
-                    ((intensity / 100f * effect.stampIntensity).coerceIn(0f, 1f) * 255f).roundToInt()
-                native.drawBitmap(stampLayer.bitmap, stampLayer.left, stampLayer.top, stampPaint)
+    Box(modifier) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            if (showOriginal) return@Canvas
+            val scaleX = size.width / graph.width
+            val scaleY = size.height / graph.height
+            graph.update(programs, photo.seed, intensity / 100f)
+            drawIntoCanvas { canvas ->
+                val native = canvas.nativeCanvas
+                val save = native.save()
+                native.scale(scaleX, scaleY)
+                native.drawRenderNode(graph.root)
+                if (stampLayer != null && intensity > 0 && effect.stampIntensity > 0f) {
+                    stampPaint.alpha =
+                        ((intensity / 100f * effect.stampIntensity).coerceIn(0f, 1f) * 255f).roundToInt()
+                    native.drawBitmap(stampLayer.bitmap, stampLayer.left, stampLayer.top, stampPaint)
+                }
+                native.restoreToCount(save)
             }
-            native.restoreToCount(save)
+        }
+        if (showOriginal) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
     }
 }
@@ -372,7 +394,7 @@ private fun CpuEffectImage(
 ) {
     val rendered by produceState<Bitmap?>(initialValue = null, photo.id, effect, intensity) {
         val job = currentCoroutineContext()[Job]
-        value = withContext(Dispatchers.Default) {
+        value = renderOnBackground(dispose = Bitmap::recycle) {
             EffectBitmapRenderer.render(
                 photo.bitmap,
                 effect,
@@ -409,7 +431,11 @@ private fun CpuEffectImage(
 
 /** Simple grey rule used when the photo is still decoding. */
 @Composable
-fun PhotoLoadingPlaceholder(modifier: Modifier = Modifier) {
+fun PhotoLoadingPlaceholder(
+    modifier: Modifier = Modifier,
+    isLoading: Boolean = true,
+    onPickPhoto: (() -> Unit)? = null,
+) {
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -418,17 +444,29 @@ fun PhotoLoadingPlaceholder(modifier: Modifier = Modifier) {
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            androidx.compose.material3.CircularProgressIndicator(
-                color = EditorColors.Accent,
-                modifier = Modifier.size(28.dp),
-                strokeWidth = 2.dp,
-            )
+            if (isLoading) {
+                androidx.compose.material3.CircularProgressIndicator(
+                    color = EditorColors.Accent,
+                    modifier = Modifier.size(28.dp),
+                    strokeWidth = 2.dp,
+                )
+            }
             Spacer(Modifier.height(10.dp))
             Text(
-                text = "Loading photo",
+                text = if (isLoading) "Loading photo" else "Choose a photo to continue",
                 color = EditorColors.TextSecondary,
                 fontSize = 12.sp,
             )
+            if (!isLoading && onPickPhoto != null) {
+                Text(
+                    text = "Choose photo",
+                    color = EditorColors.Accent,
+                    modifier = Modifier
+                        .clickable(onClick = onPickPhoto)
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .semantics { contentDescription = "change_photo" },
+                )
+            }
         }
     }
 }

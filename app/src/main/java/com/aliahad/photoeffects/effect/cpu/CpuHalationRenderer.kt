@@ -83,9 +83,9 @@ class CpuHalationRenderer(private val params: HalationParams) : CpuEffect {
         val r3 = max(8, (64f * sc * blurScale + 0.5f).toInt())
         val field = run {
             val bright = FloatArray(n) { i ->
-                val r = PixelMath.red(input[i])
-                val g = PixelMath.green(input[i])
-                val b = PixelMath.blue(input[i])
+                val r = PixelMath.visibleRed(input[i])
+                val g = PixelMath.visibleGreen(input[i])
+                val b = PixelMath.visibleBlue(input[i])
                 val br = max(r, max(g, b))
                 var soft = (br - (floorLvl - kneeWidth)).coerceIn(0f, 2f * kneeWidth)
                 soft = soft * soft * 0.25f / (kneeWidth + 1e-5f)
@@ -114,9 +114,9 @@ class CpuHalationRenderer(private val params: HalationParams) : CpuEffect {
         val edgeRadius = max(2, (16f * sc + 0.5f).toInt())
         val edgeGate = FloatArray(n) { i ->
             PixelMath.luma(
-                PixelMath.red(input[i]),
-                PixelMath.green(input[i]),
-                PixelMath.blue(input[i]),
+                PixelMath.visibleRed(input[i]),
+                PixelMath.visibleGreen(input[i]),
+                PixelMath.visibleBlue(input[i]),
             )
         }
         run {
@@ -148,9 +148,9 @@ class CpuHalationRenderer(private val params: HalationParams) : CpuEffect {
                 val i = y * width + x
                 val srcPx = input[i]
                 val alpha = (srcPx ushr 24) and 0xFF
-                val sR = PixelMath.red(srcPx)
-                val sG = PixelMath.green(srcPx)
-                val sB = PixelMath.blue(srcPx)
+                val sR = PixelMath.visibleRed(srcPx)
+                val sG = PixelMath.visibleGreen(srcPx)
+                val sB = PixelMath.visibleBlue(srcPx)
 
                 // ------------------------------------------------ additive tinted halo
                 // Low halo energy (fringe) = hue-tinted outer colour; high energy (core next to

@@ -66,7 +66,9 @@ The stage has no master intensity; the panel uses category/control chips and one
 with HSL band/component chips. Its GPU plan is colour/HSL → optional detail → optional
 blur/refocus → optical/stylize finish; the CPU renderer uses the same order. Noise uses the
 bounded 1600-scale hash from the filter grain engine, and spatial taps/radii match the AGSL
-passes. Detail/blur pass bits become active on first non-neutral use and use a cache-stable
+passes. A neutral colour prepass is omitted. Transparent Adjust intermediates retain straight
+RGB precision with original coverage supplied separately, and every pass starts at exact texel
+centres. JPEGs retain hardware linear sampling. Detail/blur pass bits become active on first non-neutral use and use a cache-stable
 topology while dragging. The panel provides reset-all and undo; the Adjust stage is composed
 between the filter and effect (`Filter → Adjust → Effect`).
 
@@ -76,29 +78,38 @@ stage was bound as a child shader of the next stage, so a blur tap in the final 
 entire preceding shader. Costs now add instead of multiplying. Insomnia’s directional focus is
 split into a horizontal 49-tap pass and a vertical finish pass; Chicago grades once before
 aberration. The preview renders at a stable internal long edge (up to 1600 px) and is scaled to
-the card, so panel animations do not rebuild the graph. Compiled shaders and decoded assets are
-cached process-wide.
+the card, so panel animations do not rebuild the graph. Each graph owns its mutable shader
+instances, while decoded assets are cached process-wide. Integer sharpening taps use a point
+sampled source on the preview's pixel grid; fractional blur and aberration taps remain linear.
 
 The editor decodes a 1920-px working bitmap; export still re-decodes the original at the planned
-size. Thumbnails share one scaled source, are cached by photo/preset/other-stage, debounce rapid
-control changes and stop cooperatively between rows. The ambient backdrop is a tiny pre-scaled
+size. Thumbnails share one scaled source, render the current shelf, are cached by
+photo/preset/other-stage, debounce rapid control changes and stop cooperatively between rows.
+The comparison gesture retains the rendering graph. The ambient backdrop is a tiny pre-scaled
 copy instead of a live full-screen blur, and the date stamp is rasterized once per size/date
 instead of drawing hundreds of gradients each frame.
 
 One immutable edit composition supplies both backends with the same
 filter → adjust → effect order and independent strengths. Export re-decodes the original source
 at the planned size;
-it does not save the preview. A heap budget includes intermediate buffers and caps resolution
+it does not save the preview or substitute it when the original is unavailable. A render budget
+includes intermediate and native/JNI buffers and caps resolution
 for expensive effects. Directional filters reserve 32 bytes per pixel, including their
 floating-point intermediate; the aberration path adds one graded ARGB frame. JPEG Low / Medium /
 High use quality 40 / 75 / 95. Metadata can be replaced with fresh capture tags or copied from
 the source where available.
 
-The shared box/prefix-sum blur kernels have an optional NDK C++ path (`app/src/main/cpp`,
+The shared running-sum/prefix-sum blur kernels have an optional NDK C++ path (`app/src/main/cpp`,
 arm64-v8a). It is a drop-in accelerator: the Kotlin implementation remains the reference and the
 only path in JVM tests, and an on-device diagnostic verifies native float/ARGB results match the
-reference exactly before the timings are trusted. This is the start of CPU export acceleration,
-not a replacement for the deterministic Kotlin export oracle.
+reference exactly before the timings are trusted. Native allocations are checked and can fall
+back to Kotlin; both paths cooperate with cancellation. This is the start of CPU export
+acceleration, with the deterministic Kotlin renderer retained as its reference.
+
+The editor's ViewModel survives activity recreation. Saved state retains the source URI, all
+edits, navigation and bounded undo history across process recreation, with a persistent photo
+picker grant where supported. Undo history is observable independently of slider changes, and
+late photo-load completions cannot replace a newer selection.
 
 ## Build and verify
 
@@ -111,8 +122,9 @@ The JVM suite covers deterministic rendering, existing effect baselines, catalog
 independent controls, Adjust categories/spatial stages, three-stage composition and export
 planning. `FilterGpuInstrumentedTest` and `AdjustGpuInstrumentedTest` compare filter and Adjust
 shaders, composition and control endpoints against their CPU renderers through real GPU readback
-on an emulator. There are 142 JVM tests and 11 GPU parity tests, including mixed-alpha edge
-sampling.
+on an emulator. Focused regressions cover parallel optical repeatability, transparent spatial
+sampling, sharpening across transparent edges, source-grid resizing, Focal borders, export
+allocation retries, session restoration, late photo loads and cancelled bitmap ownership.
 
 The connected USB phone rejects test APK installation. Use its app UI for controls, comparison
 and export checks. The debug APK is `app/build/outputs/apk/debug/app-debug.apk`.
@@ -125,10 +137,12 @@ adb shell am start -n com.aliahad.photoeffects/.MainActivity --ez render_diagnos
 adb logcat -s RenderDiagnostics PhotoEffectsGpu
 ```
 
-The harness compares every GPU program against its CPU mirror, verifies native blur parity,
-and logs CPU/GPU timings at 640 px for representative presets. Legacy stochastic/approx blur
-families are logged for inspection; filters have transparent-edge coverage in the instrumented
-suite.
+The debug-only harness runs separately from editor rendering, compares every GPU program
+against its CPU mirror, verifies native blur parity, and logs CPU/GPU timings at 640 px for
+representative presets. Exact filter/Adjust checks and characterized legacy effect envelopes
+have separate counters and explicit limits. The Yesterday date-stamp region is excluded from
+shader-only readback. Focused endpoint and repeatability fixtures exercise the reviewed bugs.
+GPU readback timings include setup and synchronization; they are not preview frame times.
 
 ## Source map
 
@@ -159,6 +173,10 @@ suite.
 | `java/com/aliahad/photoeffects/effect/cpu/` | Effect CPU renderers and asset samplers |
 | `java/com/aliahad/photoeffects/photo/` | Source loading, export planning, EXIF and MediaStore saving |
 | `java/com/aliahad/photoeffects/ui/editor/` | Editor state, tools, controls and live preview |
+| `java/com/aliahad/photoeffects/ui/editor/EditorViewModel.kt` | Retained editor, saved session and photo-picker grants |
+| `java/com/aliahad/photoeffects/ui/editor/EditorSession.kt` | Observable bounded undo and portable session codec |
+| `java/com/aliahad/photoeffects/ui/editor/LatestPhotoLoad.kt` | Latest-request decoding and stale-result ownership |
+| `java/com/aliahad/photoeffects/photo/ExportRetry.kt` | Allocation-only export retries down to the final floor |
 
 ## Quality and provenance
 
@@ -180,6 +198,6 @@ before 12 MP exports are fast; the native blur work is a first step, not the end
 spatial controls use the same 9-tap support in CPU and AGSL; optical resampling remains a
 per-pixel approximation at extreme edges, and advanced controls (Brilliance, Push-pull, HDR,
 Ultrasharp, Midtone, Vintage, Fisheye and zoom/radial/directional blur) still need visual tuning.
-Alpha semantics for legacy transparent inputs and 16-bit/high-precision intermediates are also
+Further transparent-edge visual validation and 16-bit/high-precision intermediates remain
 future work. The photo picker may strip source GPS before the editor receives it; Keep metadata
 can copy only the tags actually available to the app.

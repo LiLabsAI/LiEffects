@@ -38,9 +38,9 @@ class CpuFocalRenderer(private val params: FocalParams) : CpuEffect {
                 val i = y * width + x
                 val srcPx = input[i]
                 val alpha = (srcPx ushr 24) and 0xFF
-                val sR = PixelMath.red(srcPx)
-                val sG = PixelMath.green(srcPx)
-                val sB = PixelMath.blue(srcPx)
+                val sR = PixelMath.visibleRed(srcPx)
+                val sG = PixelMath.visibleGreen(srcPx)
+                val sB = PixelMath.visibleBlue(srcPx)
 
                 var r = sR
                 var g = sG
@@ -67,18 +67,18 @@ class CpuFocalRenderer(private val params: FocalParams) : CpuEffect {
                         val p02 = input[y2 * width + x0]
                         val p12 = input[y2 * width + x]
                         val p22 = input[y2 * width + x2]
-                        val bR = (PixelMath.red(p00) + 2f * PixelMath.red(p10) +
-                            PixelMath.red(p20) + 2f * PixelMath.red(p01) + 4f * sR +
-                            2f * PixelMath.red(p21) + PixelMath.red(p02) +
-                            2f * PixelMath.red(p12) + PixelMath.red(p22)) * 0.0625f
-                        val bG = (PixelMath.green(p00) + 2f * PixelMath.green(p10) +
-                            PixelMath.green(p20) + 2f * PixelMath.green(p01) + 4f * sG +
-                            2f * PixelMath.green(p21) + PixelMath.green(p02) +
-                            2f * PixelMath.green(p12) + PixelMath.green(p22)) * 0.0625f
-                        val bB = (PixelMath.blue(p00) + 2f * PixelMath.blue(p10) +
-                            PixelMath.blue(p20) + 2f * PixelMath.blue(p01) + 4f * sB +
-                            2f * PixelMath.blue(p21) + PixelMath.blue(p02) +
-                            2f * PixelMath.blue(p12) + PixelMath.blue(p22)) * 0.0625f
+                        val bR = (PixelMath.visibleRed(p00) + 2f * PixelMath.visibleRed(p10) +
+                            PixelMath.visibleRed(p20) + 2f * PixelMath.visibleRed(p01) + 4f * sR +
+                            2f * PixelMath.visibleRed(p21) + PixelMath.visibleRed(p02) +
+                            2f * PixelMath.visibleRed(p12) + PixelMath.visibleRed(p22)) * 0.0625f
+                        val bG = (PixelMath.visibleGreen(p00) + 2f * PixelMath.visibleGreen(p10) +
+                            PixelMath.visibleGreen(p20) + 2f * PixelMath.visibleGreen(p01) + 4f * sG +
+                            2f * PixelMath.visibleGreen(p21) + PixelMath.visibleGreen(p02) +
+                            2f * PixelMath.visibleGreen(p12) + PixelMath.visibleGreen(p22)) * 0.0625f
+                        val bB = (PixelMath.visibleBlue(p00) + 2f * PixelMath.visibleBlue(p10) +
+                            PixelMath.visibleBlue(p20) + 2f * PixelMath.visibleBlue(p01) + 4f * sB +
+                            2f * PixelMath.visibleBlue(p21) + PixelMath.visibleBlue(p02) +
+                            2f * PixelMath.visibleBlue(p12) + PixelMath.visibleBlue(p22)) * 0.0625f
                         r = PixelMath.mix(sR, bR, m)
                         g = PixelMath.mix(sG, bG, m)
                         b = PixelMath.mix(sB, bB, m)

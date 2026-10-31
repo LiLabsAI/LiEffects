@@ -118,6 +118,27 @@ float3 filterSharpenContent(float3 base, float2 coord) {
 }
 """
 
+/** Integer sharpen taps must not interpolate across transparent texels before unpremultiplying. */
+private const val FILTER_POINT_SOURCE_AGSL = """
+uniform shader uPointSource;
+float3 filterPointRgb(float2 coord) {
+    return filterStraight(uPointSource.eval(filterClampCoord(coord)));
+}
+"""
+
+/** Replaces only integer sharpen support; fractional focus and aberration taps remain linear. */
+internal fun pointSampleSharpen(source: String): String = source
+    .replace(
+        FILTER_SHARPEN_CONTENT_AGSL,
+        FILTER_POINT_SOURCE_AGSL + FILTER_SHARPEN_CONTENT_AGSL
+            .replace("blurred += filterContentRgb(", "blurred += filterPointRgb("),
+    )
+    .replace(
+        FILTER_SOURCE_AGSL,
+        FILTER_POINT_SOURCE_AGSL + FILTER_SOURCE_AGSL
+            .replace("blurred += filterSourceRgb(", "blurred += filterPointRgb("),
+    )
+
 /** Helpers that require a `uniform shader uSource;` declaration. */
 internal const val FILTER_SOURCE_AGSL = """
 float3 filterSourceRgb(float2 coord) {

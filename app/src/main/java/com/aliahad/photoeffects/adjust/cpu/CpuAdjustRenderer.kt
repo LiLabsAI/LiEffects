@@ -31,6 +31,14 @@ class CpuAdjustRenderer(
     private val plan: AdjustPlan,
 ) : CpuEffect {
 
+    private companion object {
+        // Shared immutable tap locations; allocating this inside blur9 creates an array per pixel.
+        val BLUR9_OFFSETS = floatArrayOf(
+            1f, 0f, -1f, 0f, 0f, 1f, 0f, -1f,
+            0.7f, 0.7f, -0.7f, 0.7f, 0.7f, -0.7f, -0.7f, -0.7f,
+        )
+    }
+
     override fun apply(
         input: IntArray,
         width: Int,
@@ -426,6 +434,7 @@ class CpuAdjustRenderer(
         val gaussianRadius = max((0.002f + 0.03f * gaussian) * minDim, 1f)
         val refocusRadius = max(0.02f * minDim * refocusAmount, 1f)
         val wideRadius = max(minDim * 0.04f, 2f)
+        val vignetteRadius = max(minDim * 0.03f, 2f)
         val out = IntArray(input.size)
         PixelRunner.forEachRow(height) { y ->
             val v = (y + 0.5f) / height
@@ -461,7 +470,7 @@ class CpuAdjustRenderer(
                     val dx = (x + 0.5f) / width - 0.5f
                     val dy = v - 0.5f
                     val mask = PixelMath.smoothstep(0.35f, 0.95f, sqrt(dx * dx + dy * dy) * 1.2f)
-                    blur9(input, width, height, x, y, wideRadius, sample)
+                    blur9(input, width, height, x, y, vignetteRadius, sample)
                     val k = vignette * mask
                     r = PixelMath.mix(r, sample[0], k)
                     g = PixelMath.mix(g, sample[1], k)
@@ -516,16 +525,12 @@ class CpuAdjustRenderer(
     ) {
         sampleArgb(input, width, height, x + 0.5f, y + 0.5f, out)
         var r = out[0] * 0.2f; var g = out[1] * 0.2f; var b = out[2] * 0.2f
-        val offsets = floatArrayOf(
-            radius, 0f, -radius, 0f, 0f, radius, 0f, -radius,
-            radius * 0.7f, radius * 0.7f, -radius * 0.7f, radius * 0.7f,
-            radius * 0.7f, -radius * 0.7f, -radius * 0.7f, -radius * 0.7f,
-        )
+        val offsets = BLUR9_OFFSETS
         var k = 0
         while (k < offsets.size) {
             sampleArgb(
                 input, width, height,
-                x + 0.5f + offsets[k], y + 0.5f + offsets[k + 1], out,
+                x + 0.5f + radius * offsets[k], y + 0.5f + radius * offsets[k + 1], out,
             )
             r += out[0] * 0.1f; g += out[1] * 0.1f; b += out[2] * 0.1f
             k += 2
@@ -556,16 +561,12 @@ class CpuAdjustRenderer(
         scratch: FloatArray,
     ): Float {
         var acc = brightAt(input, width, height, x + 0.5f, y + 0.5f, scratch) * 0.2f
-        val offsets = floatArrayOf(
-            radius, 0f, -radius, 0f, 0f, radius, 0f, -radius,
-            radius * 0.7f, radius * 0.7f, -radius * 0.7f, radius * 0.7f,
-            radius * 0.7f, -radius * 0.7f, -radius * 0.7f, -radius * 0.7f,
-        )
+        val offsets = BLUR9_OFFSETS
         var k = 0
         while (k < offsets.size) {
             acc += brightAt(
                 input, width, height,
-                x + 0.5f + offsets[k], y + 0.5f + offsets[k + 1], scratch,
+                x + 0.5f + radius * offsets[k], y + 0.5f + radius * offsets[k + 1], scratch,
             ) * 0.1f
             k += 2
         }
@@ -586,9 +587,9 @@ class CpuAdjustRenderer(
         val grainSeed = params.grainSeed(seed)
         val minDim = min(width, height)
         val out = IntArray(input.size)
-        val sample = FloatArray(3)
         PixelRunner.forEachRow(height) { y ->
             val v = (y + 0.5f) / height
+            val sample = FloatArray(3)
             for (x in 0 until width) {
                 val i = y * width + x
                 val src = input[i]
@@ -692,15 +693,43 @@ class CpuAdjustRenderer(
         val p10 = input[y0 * width + x1]
         val p01 = input[y1 * width + x0]
         val p11 = input[y1 * width + x1]
+        // BitmapShader interpolates premultiplied texels. Interpolating straight RGB would let
+        // invisible RGB in transparent pixels bleed into neighbours and disagree with the GPU.
+        // Keep opaque photo sampling on the original arithmetic path without alpha divisions.
+        if ((p00 and p10 and p01 and p11) ushr 24 == 255) {
+            for (channel in 0..2) {
+                val shift = 16 - channel * 8
+                val a = ((p00 ushr shift) and 255) / 255f
+                val b = ((p10 ushr shift) and 255) / 255f
+                val c = ((p01 ushr shift) and 255) / 255f
+                val d = ((p11 ushr shift) and 255) / 255f
+                val top = a + (b - a) * fx
+                val bottom = c + (d - c) * fx
+                out[channel] = top + (bottom - top) * fy
+            }
+            return
+        }
+        val a00 = (p00 ushr 24) / 255f
+        val a10 = (p10 ushr 24) / 255f
+        val a01 = (p01 ushr 24) / 255f
+        val a11 = (p11 ushr 24) / 255f
+        val alphaTop = a00 + (a10 - a00) * fx
+        val alphaBottom = a01 + (a11 - a01) * fx
+        val alpha = alphaTop + (alphaBottom - alphaTop) * fy
+        if (alpha <= 0f) {
+            out.fill(0f)
+            return
+        }
         for (channel in 0..2) {
             val shift = 16 - channel * 8
-            val a = ((p00 ushr shift) and 255) / 255f
-            val b = ((p10 ushr shift) and 255) / 255f
-            val c = ((p01 ushr shift) and 255) / 255f
-            val d = ((p11 ushr shift) and 255) / 255f
+            val a = ((p00 ushr shift) and 255) / 255f * a00
+            val b = ((p10 ushr shift) and 255) / 255f * a10
+            val c = ((p01 ushr shift) and 255) / 255f * a01
+            val d = ((p11 ushr shift) and 255) / 255f * a11
             val top = a + (b - a) * fx
             val bottom = c + (d - c) * fx
-            out[channel] = top + (bottom - top) * fy
+            val value = top + (bottom - top) * fy
+            out[channel] = value / alpha
         }
     }
 
@@ -742,7 +771,7 @@ class CpuAdjustRenderer(
         val dx = cos(angle).toFloat() * length
         val dy = sin(angle).toFloat() * length
         for (tap in 0 until 8) {
-            val t = (tap + 1) / 8f - 0.5f
+            val t = (tap + 0.5f) / 8f - 0.5f
             sampleArgb(input, width, height, x + 0.5f + dx * t, y + 0.5f + dy * t, out)
             r += out[0]; g += out[1]; b += out[2]
         }

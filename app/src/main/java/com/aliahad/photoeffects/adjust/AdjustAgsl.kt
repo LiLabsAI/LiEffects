@@ -53,6 +53,9 @@ uniform float uDirectionalBlur;
 """
 
 internal const val ADJUST_COMMON_AGSL = """
+uniform shader uOriginalAlpha;
+uniform float uOpaqueSource;
+
 float adjustLuma(float3 c) { return dot(c, float3(0.2126, 0.7152, 0.0722)); }
 
 float3 adjustStraight(half4 c) {
@@ -65,12 +68,37 @@ float2 adjustClampCoord(float2 p) {
     return clamp(p, float2(0.5, 0.5), max(uResolution - float2(0.5, 0.5), float2(0.5, 0.5)));
 }
 
+// RenderNode coordinate interpolation can drift just off an exact texel center. At alpha zero,
+// unpremultiplying even a tiny neighbour contribution changes the full straight colour.
+float2 adjustPixelCenter(float2 p) { return floor(p) + float2(0.5); }
+
 float4 adjustContent(float2 p) {
     half4 h = content.eval(adjustClampCoord(p));
     return float4(adjustStraight(h), float(h.a));
 }
 
-float3 adjustSample(float2 p) { return adjustContent(p).rgb; }
+// Offscreen bilinear sampling can quantize tiny alpha before unpremultiplication. Match
+// the CPU sampler by interpolating texels with original coverage on transparent images.
+// JPEGs keep the single hardware sample; every editor stage preserves original coverage.
+float4 adjustVertex(float2 p) {
+    half4 h = content.eval(p);
+    float a = float(uOriginalAlpha.eval(p).a);
+    return float4(adjustStraight(h) * a, a);
+}
+
+float3 adjustSample(float2 p) {
+    if (uOpaqueSource > 0.5) return adjustContent(p).rgb;
+    float2 q = clamp(p - float2(0.5), float2(0.0), uResolution - float2(1.0));
+    float2 i = floor(q);
+    float2 f = q - i;
+    float2 hi = uResolution - float2(0.5);
+    float4 a = adjustVertex(i + float2(0.5));
+    float4 b = adjustVertex(min(i + float2(1.5, 0.5), hi));
+    float4 c = adjustVertex(min(i + float2(0.5, 1.5), hi));
+    float4 d = adjustVertex(min(i + float2(1.5), hi));
+    float4 h = mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+    return h.a > 0.0 ? h.rgb / h.a : float3(0.0);
+}
 
 float adjustScreen(float a, float b) { return 1.0 - (1.0 - a) * (1.0 - b); }
 
@@ -184,8 +212,8 @@ uniform float3 uHslBlue;
 uniform float3 uHslPurple;
 """ + ADJUST_COMMON_AGSL + """
 half4 main(float2 coord) {
+    coord = adjustPixelCenter(coord);
     half4 src = content.eval(adjustClampCoord(coord));
-    float alpha = float(src.a);
     float3 c = adjustStraight(src);
 
     c *= pow(2.0, 0.5 * uExposure);
@@ -272,12 +300,16 @@ half4 main(float2 coord) {
         c = adjustHslToRgb(hsl);
     }
     c = clamp(c, 0.0, 1.0);
-    return half4(half(c.r * alpha), half(c.g * alpha), half(c.b * alpha), half(alpha));
+    // Intermediate Adjust layers carry straight RGB at full 8-bit precision. Coverage remains
+    // in uOriginalAlpha and the finish pass restores it; storing RGB premultiplied here would
+    // discard colour precision at low alpha before a later blur/optical pass resamples it.
+    return half4(half(c.r), half(c.g), half(c.b), 1.0);
 }
 """
 
 internal const val ADJUST_DETAIL_AGSL = ADJUST_UNIFORMS_AGSL + ADJUST_COMMON_AGSL + """
 half4 main(float2 coord) {
+    coord = adjustPixelCenter(coord);
     float4 src = adjustContent(coord);
     float3 c = src.rgb;
     float luma = adjustLuma(c);
@@ -298,7 +330,7 @@ half4 main(float2 coord) {
     }
     if (uSharpen != 0.0) {
         float3 blurred = adjustBlur3(coord, 1.0);
-        c += (c - blurred) * uSharpen * 1.2;
+        c = clamp(c + (c - blurred) * uSharpen * 1.2, 0.0, 1.0);
     }
     if (uUltrasharp != 0.0) c += (luma - wideLuma) * uUltrasharp * 1.5;
     if (uClarity != 0.0) {
@@ -320,13 +352,13 @@ half4 main(float2 coord) {
         }
     }
     c = clamp(c, 0.0, 1.0);
-    float alpha = src.a;
-    return half4(half(c.r * alpha), half(c.g * alpha), half(c.b * alpha), half(alpha));
+    return half4(half(c.r), half(c.g), half(c.b), 1.0);
 }
 """
 
 internal const val ADJUST_BLUR_AGSL = ADJUST_UNIFORMS_AGSL + ADJUST_COMMON_AGSL + """
 half4 main(float2 coord) {
+    coord = adjustPixelCenter(coord);
     float4 src = adjustContent(coord);
     float3 c = src.rgb;
     float minDim = min(uResolution.x, uResolution.y);
@@ -390,16 +422,17 @@ half4 main(float2 coord) {
         c = mix(c, acc / 8.0, 0.75);
     }
     c = clamp(c, 0.0, 1.0);
-    float alpha = src.a;
-    return half4(half(c.r * alpha), half(c.g * alpha), half(c.b * alpha), half(alpha));
+    return half4(half(c.r), half(c.g), half(c.b), 1.0);
 }
 """
 
-internal const val ADJUST_FINISH_AGSL = ADJUST_UNIFORMS_AGSL + com.aliahad.photoeffects.filter.FILTER_GRAIN_AGSL + ADJUST_COMMON_AGSL + """
+internal const val ADJUST_FINISH_AGSL = ADJUST_UNIFORMS_AGSL +
+    com.aliahad.photoeffects.filter.FILTER_GRAIN_AGSL + ADJUST_COMMON_AGSL + """
 half4 main(float2 coord) {
+    coord = adjustPixelCenter(coord);
     float4 src = adjustContent(coord);
     float3 c = src.rgb;
-    float alpha = src.a;
+    float alpha = float(uOriginalAlpha.eval(adjustClampCoord(coord)).a);
     if (uFisheye != 0.0) {
         float2 p = coord / uResolution - float2(0.5, 0.5);
         float r2 = dot(p, p);

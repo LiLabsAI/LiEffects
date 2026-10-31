@@ -99,6 +99,11 @@ internal object PixelMath {
     fun green(argb: Int): Float = ((argb shr 8) and 0xFF) / 255f
     fun blue(argb: Int): Float = (argb and 0xFF) / 255f
 
+    /** Straight colour at a texel centre, matching unpremultiplied BitmapShader samples. */
+    fun visibleRed(argb: Int): Float = if (argb ushr 24 == 0) 0f else red(argb)
+    fun visibleGreen(argb: Int): Float = if (argb ushr 24 == 0) 0f else green(argb)
+    fun visibleBlue(argb: Int): Float = if (argb ushr 24 == 0) 0f else blue(argb)
+
     /** Pack float RGB (0..1) + integer alpha into ARGB. */
     fun pack(r: Float, g: Float, b: Float, alpha: Int): Int {
         val ri = (r.coerceIn(0f, 1f) * 255f).roundToInt()
@@ -109,7 +114,8 @@ internal object PixelMath {
 
     /**
      * Bilinear ARGB sample at pixel-space coordinates (pixel centres at +0.5).
-     * Used for the radial chromatic-aberration stage.
+     * Interpolates premultiplied texels and returns straight RGB plus interpolated alpha, matching
+     * BitmapShader sampling. Used for the radial chromatic-aberration stage.
      */
     fun sampleArgb(src: IntArray, width: Int, height: Int, x: Float, y: Float): Int {
         val cx = (x - 0.5f).coerceIn(0f, (width - 1).toFloat())
@@ -124,10 +130,22 @@ internal object PixelMath {
         val p10 = src[y0 * width + x1]
         val p01 = src[y1 * width + x0]
         val p11 = src[y1 * width + x1]
-        val r = mix(mix(red(p00), red(p10), fx), mix(red(p01), red(p11), fx), fy)
-        val g = mix(mix(green(p00), green(p10), fx), mix(green(p01), green(p11), fx), fy)
-        val b = mix(mix(blue(p00), blue(p10), fx), mix(blue(p01), blue(p11), fx), fy)
-        return pack(r, g, b, 255)
+        if ((p00 and p10 and p01 and p11) ushr 24 == 255) {
+            val r = mix(mix(red(p00), red(p10), fx), mix(red(p01), red(p11), fx), fy)
+            val g = mix(mix(green(p00), green(p10), fx), mix(green(p01), green(p11), fx), fy)
+            val b = mix(mix(blue(p00), blue(p10), fx), mix(blue(p01), blue(p11), fx), fy)
+            return pack(r, g, b, 255)
+        }
+        val a00 = (p00 ushr 24) / 255f
+        val a10 = (p10 ushr 24) / 255f
+        val a01 = (p01 ushr 24) / 255f
+        val a11 = (p11 ushr 24) / 255f
+        val alpha = mix(mix(a00, a10, fx), mix(a01, a11, fx), fy)
+        if (alpha <= 0f) return 0
+        val r = mix(mix(red(p00) * a00, red(p10) * a10, fx), mix(red(p01) * a01, red(p11) * a11, fx), fy) / alpha
+        val g = mix(mix(green(p00) * a00, green(p10) * a10, fx), mix(green(p01) * a01, green(p11) * a11, fx), fy) / alpha
+        val b = mix(mix(blue(p00) * a00, blue(p10) * a10, fx), mix(blue(p01) * a01, blue(p11) * a11, fx), fy) / alpha
+        return pack(r, g, b, (alpha * 255f).roundToInt())
     }
 
     fun mixArgb(a: Int, b: Int, t: Float): Int {

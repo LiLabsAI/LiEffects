@@ -45,7 +45,7 @@ object FilterRegistry {
 
     private fun gpuProgram(p: FilterParams): GpuProgram {
         val uniforms = p.uniforms()
-        return when {
+        val program = when {
             // Not used by the bundled catalogue, but keep the correct single-pass fallback.
             p.softFocus > 0f && p.aberration > 0 -> GpuProgram(FILTER_AGSL, uniforms)
             p.softFocus > 0f -> GpuProgram(
@@ -62,5 +62,25 @@ object FilterRegistry {
             )
             else -> GpuProgram(FILTER_AGSL, uniforms)
         }
+        if (p.sharpen <= 0) return program
+        // Point taps are a separate original-source input: using the interpolated content layer
+        // here leaked neighboring RGB through nominally transparent texels on real GPU hardware.
+        fun pointPass(pass: GpuPass): GpuPass {
+            val source = pointSampleSharpen(pass.agslSource)
+            return if (source == pass.agslSource) pass else pass.copy(
+                agslSource = source,
+                baseShaderInputs = pass.baseShaderInputs + "uPointSource",
+                nearestBaseShaderInputs = pass.nearestBaseShaderInputs + "uPointSource",
+            )
+        }
+        val source = pointSampleSharpen(program.agslSource)
+        return program.copy(
+            agslSource = source,
+            baseShaderInputs = if (source == program.agslSource) program.baseShaderInputs
+                else program.baseShaderInputs + "uPointSource",
+            nearestBaseShaderInputs = if (source == program.agslSource) program.nearestBaseShaderInputs
+                else program.nearestBaseShaderInputs + "uPointSource",
+            internalPasses = program.internalPasses.map(::pointPass),
+        )
     }
 }

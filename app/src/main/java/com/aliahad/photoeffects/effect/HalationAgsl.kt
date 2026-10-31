@@ -42,6 +42,12 @@ uniform float uFade;
 uniform float uSaturation;
 uniform float uVignette;
 
+// RuntimeShader child colors are premultiplied; effect math uses straight RGB like the CPU.
+float3 sourceStraight(half4 h) {
+    return h.a > 0.0 ? float3(float(h.r), float(h.g), float(h.b)) / float(h.a)
+        : float3(0.0);
+}
+
 float fract1(float x) { return x - floor(x); }
 
 // Scaled-lattice float sin-hash (mirrors PixelMath.hashF): small lattice coordinates keep
@@ -55,7 +61,7 @@ float luma3(float3 c) { return dot(c, float3(0.2126, 0.7152, 0.0722)); }
 
 float3 rgbAt(float2 p) {
     half4 h = content.eval(p);
-    return float3(h.r, h.g, h.b);
+    return sourceStraight(h);
 }
 
 float lumaAt(float2 p) { return luma3(rgbAt(p)); }
@@ -136,7 +142,7 @@ half4 main(float2 fragCoord) {
     float2 res = max(uResolution, float2(1.0, 1.0));
     float2 uv = fragCoord / res;
     float sc = min(res.x, res.y) / 1080.0;
-    float3 src = float3(srcH.r, srcH.g, srcH.b);
+    float3 src = sourceStraight(srcH);
 
     // ------------------------------------------------------------------ 2. halation field
     // Tight fringe pyramid (tuned against the PREQUEL references): 8/28/64 · m.
@@ -226,6 +232,7 @@ half4 main(float2 fragCoord) {
 
     // ------------------------------------------------------------------ 8. intensity blend
     float3 outc = mix(src, clamp(c, 0.0, 1.0), t);
-    return half4(half(outc.x), half(outc.y), half(outc.z), srcH.a);
+    float alpha = float(srcH.a);
+    return half4(half(outc.x * alpha), half(outc.y * alpha), half(outc.z * alpha), srcH.a);
 }
 """

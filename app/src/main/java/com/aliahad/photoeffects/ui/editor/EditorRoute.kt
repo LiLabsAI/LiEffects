@@ -6,22 +6,15 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
-import kotlinx.coroutines.launch
 
 /**
- * Compose entry point: owns the [EditorState], loads the bundled demo photo on first launch,
- * wires the Android photo picker and surfaces state messages as toasts.
+ * Wires the retained editor to the Android photo picker and surfaces state messages as toasts.
  */
 @Composable
-fun EditorRoute() {
+fun EditorRoute(viewModel: EditorViewModel) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val state = remember { EditorState(context.applicationContext) }
-
-    LaunchedEffect(Unit) { state.bootstrap() }
+    val state = viewModel.state
 
     val message = state.message
     LaunchedEffect(message) {
@@ -35,12 +28,13 @@ fun EditorRoute() {
         contract = ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
         if (uri != null) {
-            scope.launch { state.loadUserPhoto(uri) }
+            viewModel.loadPhoto(uri)
         }
     }
 
     EditorScreen(
         state = state,
+        onSave = viewModel::save,
         onPickPhoto = {
             picker.launch(
                 PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),

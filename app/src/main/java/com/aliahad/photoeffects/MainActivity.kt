@@ -1,11 +1,15 @@
 package com.aliahad.photoeffects
 
+import android.content.pm.ApplicationInfo
 import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.view.WindowManager
+import android.view.Gravity
+import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.lifecycle.ViewModelProvider
 import com.aliahad.photoeffects.effect.cpu.BlurMaskData
 import com.aliahad.photoeffects.effect.cpu.BlurMaskStore
 import com.aliahad.photoeffects.effect.cpu.FocalLutData
@@ -16,6 +20,7 @@ import com.aliahad.photoeffects.effect.FocalFamily
 import com.aliahad.photoeffects.effect.KujiFamily
 import com.aliahad.photoeffects.diagnostics.RenderDiagnostics
 import com.aliahad.photoeffects.ui.editor.EditorRoute
+import com.aliahad.photoeffects.ui.editor.EditorViewModel
 import com.aliahad.photoeffects.ui.theme.PhotoEffectsTheme
 import kotlin.math.roundToInt
 
@@ -31,15 +36,31 @@ class MainActivity : ComponentActivity() {
         loadBlurMask()
         loadKujiFrames()
         loadFocalLuts()
+        // This explicit debug launch has no editor or background thumbnail bootstrap competing
+        // with the measurements. Release builds ignore the extra and open the normal editor.
+        if (intent.getBooleanExtra("render_diagnostics", false) &&
+            applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+        ) {
+            setContentView(TextView(this).apply {
+                text = "Running render diagnostics…"
+                gravity = Gravity.CENTER
+                setTextColor(android.graphics.Color.WHITE)
+                setBackgroundColor(android.graphics.Color.BLACK)
+            })
+            Thread {
+                try {
+                    RenderDiagnostics.run(applicationContext)
+                } finally {
+                    runOnUiThread { finish() }
+                }
+            }.apply { isDaemon = true }.start()
+            return
+        }
+        val editor = ViewModelProvider(this)[EditorViewModel::class.java]
         setContent {
             PhotoEffectsTheme {
-                EditorRoute()
+                EditorRoute(editor)
             }
-        }
-        if (intent.getBooleanExtra("render_diagnostics", false)) {
-            Thread { RenderDiagnostics.run(applicationContext) }
-                .apply { isDaemon = true }
-                .start()
         }
     }
 

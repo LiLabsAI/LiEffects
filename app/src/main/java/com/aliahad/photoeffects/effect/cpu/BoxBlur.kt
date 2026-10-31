@@ -5,11 +5,13 @@ package com.aliahad.photoeffects.effect.cpu
  *
  * The GPU path uses a 9-tap gaussian approximation; a box blur of radius r has a similar
  * low-pass effect and keeps the CPU renderer allocation-light and fast for thumbnails,
- * exports and unit tests.
+ * exports and unit tests. The ARGB input treats fully transparent texels as black, matching the
+ * shader's straight-colour point samples; hidden RGB must not bleed into visible neighbours.
  */
 internal object BoxBlur {
 
     fun blurArgb(src: IntArray, width: Int, height: Int, radius: Int): IntArray {
+        RenderCancellation.check()
         if (radius < 1) return src
         if (NativeBlur.available) {
             val native = IntArray(src.size)
@@ -19,12 +21,14 @@ internal object BoxBlur {
     }
 
     internal fun blurArgbReference(src: IntArray, width: Int, height: Int, radius: Int): IntArray {
+        RenderCancellation.check()
         if (radius < 1) return src
         val tmp = IntArray(src.size)
         val out = IntArray(src.size)
         val window = 2 * radius + 1
         // horizontal
         for (y in 0 until height) {
+            RenderCancellation.check()
             val row = y * width
             for (x in 0 until width) {
                 var r = 0
@@ -33,7 +37,8 @@ internal object BoxBlur {
                 var a = 0
                 for (k in -radius..radius) {
                     val sx = (x + k).coerceIn(0, width - 1)
-                    val p = src[row + sx]
+                    val raw = src[row + sx]
+                    val p = if (raw ushr 24 == 0) 0 else raw
                     r += (p shr 16) and 0xFF
                     g += (p shr 8) and 0xFF
                     b += p and 0xFF
@@ -45,6 +50,7 @@ internal object BoxBlur {
         }
         // vertical
         for (x in 0 until width) {
+            RenderCancellation.check()
             for (y in 0 until height) {
                 var r = 0
                 var g = 0
@@ -66,11 +72,13 @@ internal object BoxBlur {
     }
 
     fun blurFloat(src: FloatArray, width: Int, height: Int, radius: Int): FloatArray {
+        RenderCancellation.check()
         if (radius < 1) return src
         val tmp = FloatArray(src.size)
         val out = FloatArray(src.size)
         val window = 2 * radius + 1
         for (y in 0 until height) {
+            RenderCancellation.check()
             val row = y * width
             for (x in 0 until width) {
                 var sum = 0f
@@ -81,6 +89,7 @@ internal object BoxBlur {
             }
         }
         for (x in 0 until width) {
+            RenderCancellation.check()
             for (y in 0 until height) {
                 var sum = 0f
                 for (k in -radius..radius) {
@@ -99,6 +108,7 @@ internal object BoxBlur {
      * clamped edge replication, so cost is O(n) independent of radius.
      */
     fun blurFloatFast(src: FloatArray, width: Int, height: Int, radius: Int): FloatArray {
+        RenderCancellation.check()
         if (radius < 1 || width <= 0 || height <= 0) return src.copyOf()
         if (NativeBlur.available) {
             val native = FloatArray(src.size)
@@ -113,6 +123,7 @@ internal object BoxBlur {
         height: Int,
         radius: Int,
     ): FloatArray {
+        RenderCancellation.check()
         if (radius < 1 || width <= 0 || height <= 0) return src.copyOf()
         val window = 2 * radius + 1
         val inv = 1f / window
@@ -123,6 +134,7 @@ internal object BoxBlur {
         val extW = width + 2 * radius
         val prefix = FloatArray(extW + 1)
         for (y in 0 until height) {
+            RenderCancellation.check()
             val row = y * width
             prefix[0] = 0f
             for (x in 0 until extW) {
@@ -137,6 +149,7 @@ internal object BoxBlur {
         val extH = height + 2 * radius
         val prefixC = FloatArray(extH + 1)
         for (x in 0 until width) {
+            RenderCancellation.check()
             prefixC[0] = 0f
             for (y in 0 until extH) {
                 prefixC[y + 1] = prefixC[y] + tmp[(y - radius).coerceIn(0, height - 1) * width + x]

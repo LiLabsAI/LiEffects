@@ -55,9 +55,9 @@ class CpuKujiRenderer(private val params: KujiParams) : CpuEffect {
                 val i = y * width + x
                 val srcPx = input[i]
                 val alpha = (srcPx ushr 24) and 0xFF
-                val sR = PixelMath.red(srcPx)
-                val sG = PixelMath.green(srcPx)
-                val sB = PixelMath.blue(srcPx)
+                val sR = PixelMath.visibleRed(srcPx)
+                val sG = PixelMath.visibleGreen(srcPx)
+                val sB = PixelMath.visibleBlue(srcPx)
 
                 // 1. per-channel cubic tone curves
                 var cR = toneR.eval(sR)

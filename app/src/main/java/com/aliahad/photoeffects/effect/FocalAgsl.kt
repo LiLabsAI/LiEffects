@@ -35,9 +35,16 @@ const float LUT_MAX = 32.0;
 const float LUT_TILE = 33.0;
 const float LUT_TILES = 6.0;
 
+// RuntimeShader child colors are premultiplied; effect math uses straight RGB like the CPU.
+float3 sourceStraight(half4 h) {
+    return h.a > 0.0 ? float3(float(h.r), float(h.g), float(h.b)) / float(h.a)
+        : float3(0.0);
+}
+
 float3 sampleRgb(float2 p) {
-    half4 h = content.eval(p);
-    return float3(h.r, h.g, h.b);
+    float2 hi = max(uResolution - float2(0.5), float2(0.5));
+    half4 h = content.eval(clamp(p, float2(0.5), hi));
+    return sourceStraight(h);
 }
 
 // One LUT node (r, g, b in 0..32) read at its exact texel centre.
@@ -89,7 +96,7 @@ half4 main(float2 fragCoord) {
         return srcH;
     }
 
-    float3 src = float3(srcH.r, srcH.g, srcH.b);
+    float3 src = sourceStraight(srcH);
     float3 base = src;
 
     if (uEllipseOn > 0.5) {
@@ -104,6 +111,7 @@ half4 main(float2 fragCoord) {
 
     float3 c = lutLookup(base);
     float3 outc = mix(src, c, t);
-    return half4(half(outc.x), half(outc.y), half(outc.z), srcH.a);
+    float alpha = float(srcH.a);
+    return half4(half(outc.x * alpha), half(outc.y * alpha), half(outc.z * alpha), srcH.a);
 }
 """

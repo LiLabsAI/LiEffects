@@ -56,6 +56,12 @@ uniform float uMottleFreq;
 uniform float uMottleAmp2;
 uniform float uMottleFreq2;
 
+// RuntimeShader child colors are premultiplied; effect math uses straight RGB like the CPU.
+float3 sourceStraight(half4 h) {
+    return h.a > 0.0 ? float3(float(h.r), float(h.g), float(h.b)) / float(h.a)
+        : float3(0.0);
+}
+
 float fract1(float x) { return x - floor(x); }
 
 float hashF(float2 cell, float seed) {
@@ -80,7 +86,7 @@ float fbm2(float2 p, float seed) {
 
 float3 sampleRgb(float2 p) {
     half4 h = content.eval(p);
-    return float3(h.r, h.g, h.b);
+    return sourceStraight(h);
 }
 
 // 3x3 binomial (approximate gaussian) with the given sample spacing.
@@ -109,7 +115,7 @@ half4 main(float2 fragCoord) {
     float minDim = min(res.x, res.y);
     float sc = minDim / 1080.0;
     float2 uv = fragCoord / res;
-    float3 src = float3(srcH.r, srcH.g, srcH.b);
+    float3 src = sourceStraight(srcH);
 
     // ------------------------------------------------- 1. small global soft-focus gaussian
     float sigma = uSigma * sc;
@@ -158,6 +164,7 @@ half4 main(float2 fragCoord) {
 
     // ------------------------------------------------- 6. intensity blend
     float3 outc = mix(src, c, t);
-    return half4(half(outc.x), half(outc.y), half(outc.z), srcH.a);
+    float alpha = float(srcH.a);
+    return half4(half(outc.x * alpha), half(outc.y * alpha), half(outc.z * alpha), srcH.a);
 }
 """

@@ -54,9 +54,9 @@ class CpuDustyRenderer(private val params: DustyParams) : CpuEffect {
         val halationMask: FloatArray? = if (params.halation > 0.001f) {
             val hi = FloatArray(n) { i ->
                 val l = PixelMath.luma(
-                    PixelMath.red(input[i]),
-                    PixelMath.green(input[i]),
-                    PixelMath.blue(input[i]),
+                    PixelMath.visibleRed(input[i]),
+                    PixelMath.visibleGreen(input[i]),
+                    PixelMath.visibleBlue(input[i]),
                 )
                 (l - 0.65f).coerceAtLeast(0f)
             }
@@ -113,9 +113,9 @@ class CpuDustyRenderer(private val params: DustyParams) : CpuEffect {
                 val i = y * width + x
                 val srcPx = input[i]
                 val alpha = (srcPx ushr 24) and 0xFF
-                val sR = PixelMath.red(srcPx)
-                val sG = PixelMath.green(srcPx)
-                val sB = PixelMath.blue(srcPx)
+                val sR = PixelMath.visibleRed(srcPx)
+                val sG = PixelMath.visibleGreen(srcPx)
+                val sB = PixelMath.visibleBlue(srcPx)
 
                 // ---------------------------------------------------- 2a. aberration
                 var aberR = sR
@@ -127,6 +127,8 @@ class CpuDustyRenderer(private val params: DustyParams) : CpuEffect {
                     val dy = (uy - 0.5f) * aberrScale * height
                     val rp = PixelMath.sampleArgb(input, width, height, x + 0.5f + dx, fy + dy)
                     val bp = PixelMath.sampleArgb(input, width, height, x + 0.5f - dx, fy - dy)
+                    // The sampler already removed invisible source RGB. Read its straight
+                    // channels even when very small interpolated coverage rounds to alpha 0.
                     aberR = PixelMath.red(rp)
                     aberB = PixelMath.blue(bp)
                 }
@@ -136,9 +138,9 @@ class CpuDustyRenderer(private val params: DustyParams) : CpuEffect {
                 var bG = aberG
                 var bB = aberB
                 if (blurred != null) {
-                    bR = PixelMath.mix(aberR, PixelMath.red(blurred[i]), blurW)
-                    bG = PixelMath.mix(aberG, PixelMath.green(blurred[i]), blurW)
-                    bB = PixelMath.mix(aberB, PixelMath.blue(blurred[i]), blurW)
+                    bR = PixelMath.mix(aberR, PixelMath.visibleRed(blurred[i]), blurW)
+                    bG = PixelMath.mix(aberG, PixelMath.visibleGreen(blurred[i]), blurW)
+                    bB = PixelMath.mix(aberB, PixelMath.visibleBlue(blurred[i]), blurW)
                 }
 
                 // ---------------------------------------------------- 1. color grade

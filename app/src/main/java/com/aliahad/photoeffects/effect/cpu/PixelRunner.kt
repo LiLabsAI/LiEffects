@@ -20,11 +20,11 @@ internal object PixelRunner {
 
     private val pool: ExecutorService by lazy {
         Executors.newFixedThreadPool(threadCount) { r ->
-            Thread(r, "photo-cpu").apply {
-                isDaemon = true
+            Thread({
                 // Android-only; JVM tests run against SDK stubs that throw for this call.
                 runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND) }
-            }
+                r.run()
+            }, "photo-cpu").apply { isDaemon = true }
         }
     }
 
@@ -54,9 +54,8 @@ internal object PixelRunner {
         try {
             pool.invokeAll(tasks).forEach { it.get() }
         } catch (e: ExecutionException) {
-            val cause = e.cause
-            if (cause is CancellationException) throw cause
-            throw e
+            // In particular, preserve OutOfMemoryError so export can reduce its size and retry.
+            throw e.cause ?: e
         }
     }
 }

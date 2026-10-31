@@ -43,6 +43,12 @@ uniform float uOffB;
 uniform float uGrainAmp;
 uniform float uGrainCell;
 
+// RuntimeShader child colors are premultiplied; effect math uses straight RGB like the CPU.
+float3 sourceStraight(half4 h) {
+    return h.a > 0.0 ? float3(float(h.r), float(h.g), float(h.b)) / float(h.a)
+        : float3(0.0);
+}
+
 float fract1(float x) { return x - floor(x); }
 
 float hashF(float2 cell, float seed) {
@@ -59,7 +65,7 @@ half4 main(float2 fragCoord) {
 
     float2 res = max(uResolution, float2(1.0, 1.0));
     float minDim = min(res.x, res.y);
-    float3 src = float3(srcH.r, srcH.g, srcH.b);
+    float3 src = sourceStraight(srcH);
 
     // ------------------------------------------------- 1. per-channel cubic tone curves
     float3 c = float3(
@@ -89,6 +95,7 @@ half4 main(float2 fragCoord) {
 
     // ------------------------------------------------- 5. intensity blend
     float3 outc = mix(src, c, t);
-    return half4(half(outc.x), half(outc.y), half(outc.z), srcH.a);
+    float alpha = float(srcH.a);
+    return half4(half(outc.x * alpha), half(outc.y * alpha), half(outc.z * alpha), srcH.a);
 }
 """

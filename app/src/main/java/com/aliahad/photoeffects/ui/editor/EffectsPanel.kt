@@ -45,6 +45,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -78,12 +79,10 @@ import com.aliahad.photoeffects.filter.FilterRegistry
 import com.aliahad.photoeffects.effect.render.EffectBitmapRenderer
 import com.aliahad.photoeffects.photo.LoadedPhoto
 import com.aliahad.photoeffects.ui.theme.EditorColors
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 /** Shared thumbnail cache; keys include the photo, preset and the other composed stage. */
@@ -102,7 +101,8 @@ fun EffectsPanel(
 ) {
     val photo = state.photo
     val isFilters = state.activeTool == EditorTool.Filters
-    val catalogue = if (isFilters) FilterRegistry.all else EffectRegistry.all
+    // Render the shelf the user can see first; unrelated families must not delay its cards.
+    val catalogue = state.effects
     val stage = if (state.panelStage == PanelStage.Edit && state.activePreset == null) {
         PanelStage.Items
     } else {
@@ -232,7 +232,10 @@ fun EffectsPanel(
                     Column {
                         if (isFilters) {
                             Row(
-                                modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 2.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState())
+                                    .padding(start = 18.dp, end = 18.dp, top = 2.dp),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
                                 for (control in state.filterControls) {
@@ -334,7 +337,7 @@ private fun rememberEffectThumbnails(
                 value = value + (effect.id to cached)
                 continue
             }
-            val rendered = withContext(Dispatchers.Default) {
+            val rendered = renderOnBackground(dispose = Bitmap::recycle) {
                 val stage = EditStage(effect, effect.defaultIntensity)
                 val composed = if (isFilters) {
                     EditComposition.compose(stage, adjustStage, otherStage)
@@ -563,6 +566,9 @@ fun IntensitySlider(
     neutralValue: Int = 0,
 ) {
     var widthPx by remember { mutableStateOf(1f) }
+    val currentOnValueChange by rememberUpdatedState(onValueChange)
+    val currentOnDragStart by rememberUpdatedState(onDragStart)
+    val currentOnDragFinished by rememberUpdatedState(onDragFinished)
     fun valueFor(x: Float): Int {
         val pad = widthPx * 0.02f
         val usable = (widthPx - pad * 2f).coerceAtLeast(1f)
@@ -575,20 +581,20 @@ fun IntensitySlider(
             .pointerInput(widthPx, valueRange) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
-                    onDragStart()
-                    onValueChange(valueFor(down.position.x))
-                    down.consume()
-                    var active = true
-                    while (active) {
-                        val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull { it.id == down.id }
-                        if (change == null || !change.pressed) {
-                            active = false
-                            onDragFinished()
-                        } else {
-                            onValueChange(valueFor(change.position.x))
+                    currentOnDragStart()
+                    try {
+                        currentOnValueChange(valueFor(down.position.x))
+                        down.consume()
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id }
+                            if (change == null || !change.pressed) break
+                            currentOnValueChange(valueFor(change.position.x))
                             change.consume()
                         }
+                    } finally {
+                        // A panel/configuration change can cancel pointer input mid-drag.
+                        currentOnDragFinished()
                     }
                 }
             }

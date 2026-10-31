@@ -13,6 +13,7 @@ internal object FastGaussian {
 
     /** Blur one float plane with an approximate gaussian of [sigma] pixels. */
     fun blurChannel(src: FloatArray, width: Int, height: Int, sigma: Float): FloatArray {
+        RenderCancellation.check()
         if (sigma <= 0.05f || width <= 0 || height <= 0) return src.copyOf()
         val radius = kotlin.math.max(1, (sigma - 0.5f + 0.5f).toInt())
         // The first pass reads the caller's plane; blurFloatFast never mutates its input.

@@ -60,9 +60,9 @@ class CpuYesterdayRenderer(
         val mottleFreq = params.mottleFreq
 
         // ---------------------------------------------------------------- pre-blur planes
-        val baseR = FloatArray(n) { PixelMath.red(input[it]) }
-        val baseG = FloatArray(n) { PixelMath.green(input[it]) }
-        val baseB = FloatArray(n) { PixelMath.blue(input[it]) }
+        val baseR = FloatArray(n) { PixelMath.visibleRed(input[it]) }
+        val baseG = FloatArray(n) { PixelMath.visibleGreen(input[it]) }
+        val baseB = FloatArray(n) { PixelMath.visibleBlue(input[it]) }
         val (br0, bg0, bb0) = FastGaussian.blurPlanes(baseR, baseG, baseB, width, height, sigma)
         val midX = 0.5f * width
         val midY = 0.5f * height
@@ -108,9 +108,9 @@ class CpuYesterdayRenderer(
                 val i = y * width + x
                 val srcPx = input[i]
                 val alpha = (srcPx ushr 24) and 0xFF
-                val sR = PixelMath.red(srcPx)
-                val sG = PixelMath.green(srcPx)
-                val sB = PixelMath.blue(srcPx)
+                val sR = PixelMath.visibleRed(srcPx)
+                val sG = PixelMath.visibleGreen(srcPx)
+                val sB = PixelMath.visibleBlue(srcPx)
 
                 // ------------------------------------------------ 1. pre-blurred source
                 val bR = br0[i]

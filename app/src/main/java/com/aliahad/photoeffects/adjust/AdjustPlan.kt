@@ -4,12 +4,17 @@ package com.aliahad.photoeffects.adjust
 data class AdjustPlan(
     val detail: Boolean,
     val blur: Boolean,
+    val color: Boolean = false,
 ) {
-    val passCount: Int get() = 2 + (if (detail) 1 else 0) + (if (blur) 1 else 0)
+    val passCount: Int get() = 1 + (if (color) 1 else 0) + (if (detail) 1 else 0) + (if (blur) 1 else 0)
 }
 
 fun planFor(params: AdjustParams): AdjustPlan =
-    AdjustPlan(detail = params.layers.detail, blur = params.layers.blur)
+    AdjustPlan(
+        detail = params.layers.detail,
+        blur = params.layers.blur,
+        color = AdjustControl.entries.any { it.pass == AdjustPass.Color && params.value(it) != it.neutral },
+    )
 
 /**
  * Rough peak heap cost of one CPU Adjust render. The color/finish path keeps source, working and

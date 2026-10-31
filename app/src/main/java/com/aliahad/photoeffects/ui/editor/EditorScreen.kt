@@ -34,7 +34,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,7 +44,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aliahad.photoeffects.ui.theme.EditorColors
-import kotlinx.coroutines.launch
 
 /**
  * PREQUEL-style dark editor screen:
@@ -55,9 +53,9 @@ import kotlinx.coroutines.launch
 fun EditorScreen(
     state: EditorState,
     onPickPhoto: () -> Unit,
+    onSave: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val scope = rememberCoroutineScope()
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -66,6 +64,7 @@ fun EditorScreen(
         Column(modifier = Modifier.fillMaxSize()) {
             EditorTopBar(
                 canUndo = state.canUndo,
+                canSave = state.photo != null && !state.isLoadingPhoto,
                 isSaving = state.isSaving,
                 onClose = { state.resetAll() },
                 onUndo = { state.undo() },
@@ -81,7 +80,11 @@ fun EditorScreen(
             ) {
                 val photo = state.photo
                 if (photo == null) {
-                    PhotoLoadingPlaceholder(Modifier.fillMaxSize())
+                    PhotoLoadingPlaceholder(
+                        modifier = Modifier.fillMaxSize(),
+                        isLoading = state.isLoadingPhoto,
+                        onPickPhoto = onPickPhoto,
+                    )
                 } else {
                     PhotoPreviewCard(
                         photo = photo,
@@ -93,6 +96,13 @@ fun EditorScreen(
                         modifier = Modifier.fillMaxSize(),
                         strengthLabel = state.strengthLabel,
                     )
+                    if (state.isLoadingPhoto) {
+                        CircularProgressIndicator(
+                            color = EditorColors.Accent,
+                            modifier = Modifier.align(Alignment.Center).size(28.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    }
                 }
             }
 
@@ -139,7 +149,7 @@ fun EditorScreen(
                 resolutions = state.resolutionOptions,
                 plan = plan,
                 onSelect = { state.updateExportOptions(it) },
-                onSave = { scope.launch { state.save() } },
+                onSave = onSave,
                 onDismiss = { state.dismissExportSheet() },
             )
         }
@@ -149,6 +159,7 @@ fun EditorScreen(
 @Composable
 private fun EditorTopBar(
     canUndo: Boolean,
+    canSave: Boolean,
     isSaving: Boolean,
     onClose: () -> Unit,
     onUndo: () -> Unit,
@@ -192,6 +203,7 @@ private fun EditorTopBar(
         }
         SaveButton(
             isSaving = isSaving,
+            enabled = canSave,
             onSave = onSave,
             modifier = Modifier.align(Alignment.CenterEnd),
         )
@@ -201,6 +213,7 @@ private fun EditorTopBar(
 @Composable
 private fun SaveButton(
     isSaving: Boolean,
+    enabled: Boolean,
     onSave: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -208,7 +221,7 @@ private fun SaveButton(
         modifier = modifier
             .clip(RoundedCornerShape(50))
             .background(EditorColors.PanelElevated)
-            .clickable(enabled = !isSaving, onClick = onSave)
+            .clickable(enabled = enabled && !isSaving, onClick = onSave)
             .padding(horizontal = 16.dp, vertical = 9.dp)
             .semantics { contentDescription = "save" },
         verticalAlignment = Alignment.CenterVertically,

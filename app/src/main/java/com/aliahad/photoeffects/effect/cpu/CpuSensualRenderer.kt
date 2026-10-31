@@ -59,9 +59,9 @@ class CpuSensualRenderer(private val params: SensualParams) : CpuEffect {
         val gainB = params.gainB
 
         // ---------------------------------------------------------------- planes
-        val baseR = FloatArray(n) { PixelMath.red(input[it]) }
-        val baseG = FloatArray(n) { PixelMath.green(input[it]) }
-        val baseB = FloatArray(n) { PixelMath.blue(input[it]) }
+        val baseR = FloatArray(n) { PixelMath.visibleRed(input[it]) }
+        val baseG = FloatArray(n) { PixelMath.visibleGreen(input[it]) }
+        val baseB = FloatArray(n) { PixelMath.visibleBlue(input[it]) }
 
         // 1. small global soft-focus gaussian
         var (r1, g1, b1) = FastGaussian.blurPlanes(baseR, baseG, baseB, width, height, sigma)
@@ -89,9 +89,9 @@ class CpuSensualRenderer(private val params: SensualParams) : CpuEffect {
                 val i = y * width + x
                 val srcPx = input[i]
                 val alpha = (srcPx ushr 24) and 0xFF
-                val sR = PixelMath.red(srcPx)
-                val sG = PixelMath.green(srcPx)
-                val sB = PixelMath.blue(srcPx)
+                val sR = PixelMath.visibleRed(srcPx)
+                val sG = PixelMath.visibleGreen(srcPx)
+                val sB = PixelMath.visibleBlue(srcPx)
 
                 // 3. per-channel cubic tone curves
                 var cR = toneR.eval(r1[i])

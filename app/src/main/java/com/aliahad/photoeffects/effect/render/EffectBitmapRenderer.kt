@@ -29,21 +29,26 @@ object EffectBitmapRenderer {
         cancel: (() -> Boolean)? = null,
     ): Bitmap {
         val scaled = downscale(source, maxDimension)
-        val width = scaled.width
-        val height = scaled.height
-        val pixels = IntArray(width * height)
-        scaled.getPixels(pixels, 0, width, 0, 0, width, height)
         val previous = RenderCancellation.current()
-        val out = try {
+        try {
+            val width = scaled.width
+            val height = scaled.height
+            val pixels = IntArray(width * height)
+            scaled.getPixels(pixels, 0, width, 0, 0, width, height)
             RenderCancellation.set(cancel)
-            effect.cpu.apply(pixels, width, height, intensityPercent / 100f, seed)
+            val out = effect.cpu.apply(pixels, width, height, intensityPercent / 100f, seed)
+            val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            try {
+                result.setPixels(out, 0, width, 0, 0, width, height)
+                return result
+            } catch (t: Throwable) {
+                result.recycle()
+                throw t
+            }
         } finally {
             RenderCancellation.set(previous)
+            if (scaled !== source) scaled.recycle()
         }
-        val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        result.setPixels(out, 0, width, 0, 0, width, height)
-        if (scaled !== source) scaled.recycle()
-        return result
     }
 
     /**

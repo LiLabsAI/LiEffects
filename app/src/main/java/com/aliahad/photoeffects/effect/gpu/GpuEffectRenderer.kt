@@ -12,7 +12,7 @@ import java.util.concurrent.ConcurrentHashMap
  * Binds a [GpuProgram] (AGSL source + parameter uniforms) to Android's RuntimeShader /
  * RenderEffect pair used for the live GPU preview.
  *
- * The shader is compiled once per effect (expensive); only the float uniforms are updated per
+ * Each graph owns its mutable RuntimeShader instances; only their float uniforms change per
  * frame. The photo is bound as the child shader named [CONTENT_SHADER] by
  * `RenderEffect.createRuntimeShaderEffect`.
  */
@@ -21,28 +21,23 @@ object GpuEffectRenderer {
     const val CONTENT_SHADER = "content"
     private const val TAG = "PhotoEffectsGpu"
 
-    // AGSL compilation is one of the most expensive preview operations. Preview-layer changes
-    // (panel animation, image resize, slider change) rebuild RenderNodes but reuse the same shader
-    // sources; keep one compiled instance per source. The preview has one active graph at a time
-    // and composed stages use distinct sources, so uniforms/input bindings are updated safely.
-    private val shaders = ConcurrentHashMap<String, RuntimeShader>()
+    // RuntimeShader includes mutable uniforms and child bindings. Sharing one by source made
+    // offscreen diagnostics and a live preview overwrite each other, even across distinct graphs.
+    // Graph topology caching already keeps each graph's instances alive during slider changes.
+    private val compiledSources = ConcurrentHashMap.newKeySet<String>()
     private val failedSources = ConcurrentHashMap.newKeySet<String>()
 
     /** Returns null when the device/AGSL compiler rejects the program (caller falls back to CPU). */
     fun compile(program: GpuProgram): RuntimeShader? = compile(program.agslSource)
 
     fun compile(agslSource: String): RuntimeShader? {
-        shaders[agslSource]?.let { return it }
         if (agslSource in failedSources) return null
         return try {
             val created = RuntimeShader(agslSource)
-            val existing = shaders.putIfAbsent(agslSource, created)
-            if (existing == null) {
+            if (compiledSources.add(agslSource)) {
                 Log.d(TAG, "AGSL program compiled (GPU preview active)")
-                created
-            } else {
-                existing
             }
+            created
         } catch (t: Throwable) {
             failedSources.add(agslSource)
             Log.w(TAG, "AGSL program failed to compile; using CPU preview fallback", t)

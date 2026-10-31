@@ -15,15 +15,25 @@ object AdjustEffectFactory {
         val plan = planFor(params)
         val uniforms = params.scalarUniforms()
         val internal = buildList {
-            add(
+            if (plan.color) add(
                 GpuPass(
                     agslSource = ADJUST_COLOR_AGSL,
                     uniforms = uniforms,
                     vectorUniforms = params.hslUniforms(),
+                    originalAlphaShaderInputs = setOf("uOriginalAlpha"),
+                    opaqueSourceUniform = "uOpaqueSource",
                 ),
             )
-            if (plan.detail) add(GpuPass(ADJUST_DETAIL_AGSL, uniforms))
-            if (plan.blur) add(GpuPass(ADJUST_BLUR_AGSL, uniforms))
+            if (plan.detail) add(GpuPass(
+                ADJUST_DETAIL_AGSL, uniforms,
+                originalAlphaShaderInputs = setOf("uOriginalAlpha"),
+                opaqueSourceUniform = "uOpaqueSource",
+            ))
+            if (plan.blur) add(GpuPass(
+                ADJUST_BLUR_AGSL, uniforms,
+                originalAlphaShaderInputs = setOf("uOriginalAlpha"),
+                opaqueSourceUniform = "uOpaqueSource",
+            ))
         }
         return PhotoEffect(
             spec = EffectSpec(
@@ -38,6 +48,8 @@ object AdjustEffectFactory {
                 agslSource = ADJUST_FINISH_AGSL,
                 uniforms = uniforms,
                 internalPasses = internal,
+                originalAlphaShaderInputs = setOf("uOriginalAlpha"),
+                opaqueSourceUniform = "uOpaqueSource",
             ),
             summary = AdjustSummary.describe(params),
             exportBytesPerPixel = adjustBytesPerPixel(plan),

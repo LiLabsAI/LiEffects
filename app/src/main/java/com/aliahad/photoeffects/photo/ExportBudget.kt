@@ -2,13 +2,13 @@ package com.aliahad.photoeffects.photo
 
 import com.aliahad.photoeffects.effect.PhotoEffect
 import kotlin.math.max
-import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 /**
  * Picks the largest safe export resolution for the deterministic CPU renderers.
  *
- * Each effect reports its peak Java-heap cost per pixel ([PhotoEffect.exportBytesPerPixel]);
+ * Each effect reports its peak render working set per pixel ([PhotoEffect.exportBytesPerPixel]),
+ * including Java pixel arrays and native/JNI buffers;
  * the CPU mirror of HALATION/SENSUAL needs several full-frame float planes, so rendering a
  * 12 MP photo directly would exhaust the heap. The budget keeps the render within
  * [HEAP_FRACTION] of the process heap and lets [PhotoSaver] fall back further on OOM.
@@ -42,10 +42,18 @@ object ExportBudget {
     /** Fit [width] x [height] into [maxPixels], preserving aspect ratio. */
     fun targetSize(width: Int, height: Int, maxPixels: Int): Pair<Int, Int> {
         if (width <= 0 || height <= 0) return width to height
+        require(maxPixels > 0)
         val pixels = width.toLong() * height
         if (pixels <= maxPixels) return width to height
         val scale = sqrt(maxPixels.toDouble() / pixels)
-        return max(1, (width * scale).roundToInt()) to max(1, (height * scale).roundToInt())
+        var w = max(1, (width * scale).toInt())
+        var h = max(1, (height * scale).toInt())
+        // The one-pixel minimum on an extreme panorama can otherwise put it over budget.
+        if (w.toLong() * h > maxPixels) {
+            if (w >= h) w = max(1, maxPixels / h)
+            else h = max(1, maxPixels / w)
+        }
+        return w to h
     }
 
     /** Longest-edge equivalent of [maxPixels] for a [width] x [height] source. */

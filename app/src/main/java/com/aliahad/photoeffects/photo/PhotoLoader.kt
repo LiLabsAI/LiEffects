@@ -6,6 +6,8 @@ import android.graphics.BitmapFactory
 import android.graphics.ColorSpace
 import android.graphics.ImageDecoder
 import android.net.Uri
+import java.io.IOException
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.max
@@ -30,25 +32,30 @@ object PhotoLoader {
      */
     const val MAX_SOURCE_DIMENSION = 1920
 
-    private var nextId = 1L
+    private val nextId = AtomicLong(1L)
 
-    suspend fun loadDemo(context: Context): LoadedPhoto = withContext(Dispatchers.IO) {
+    suspend fun loadDemo(context: Context): LoadedPhoto = decodeOwned({ it.bitmap.recycle() }) {
         val bytes = context.assets.open(DEMO_ASSET).use { it.readBytes() }
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         val bitmap = decodeByteArray(bytes, MAX_SOURCE_DIMENSION)
-        LoadedPhoto(
-            bitmap = bitmap,
-            label = "Demo photo",
-            sourceUri = null,
-            sourceWidth = bounds.outWidth,
-            sourceHeight = bounds.outHeight,
-            id = nextId++,
-            seed = contentSeed(bitmap),
-        )
+        try {
+            LoadedPhoto(
+                bitmap = bitmap,
+                label = "Demo photo",
+                sourceUri = null,
+                sourceWidth = bounds.outWidth,
+                sourceHeight = bounds.outHeight,
+                id = nextId.getAndIncrement(),
+                seed = contentSeed(bitmap),
+            )
+        } catch (t: Throwable) {
+            bitmap.recycle()
+            throw t
+        }
     }
 
-    suspend fun loadFromUri(context: Context, uri: Uri): LoadedPhoto = withContext(Dispatchers.IO) {
+    suspend fun loadFromUri(context: Context, uri: Uri): LoadedPhoto = decodeOwned({ it.bitmap.recycle() }) {
         var sourceWidth = 0
         var sourceHeight = 0
         val bitmap = ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri)) { decoder, info, _ ->
@@ -69,40 +76,67 @@ object PhotoLoader {
                 )
             }
         }
-        LoadedPhoto(
-            bitmap = bitmap.copy(Bitmap.Config.ARGB_8888, false) ?: bitmap,
-            label = "Photo",
-            sourceUri = uri.toString(),
-            sourceWidth = sourceWidth,
-            sourceHeight = sourceHeight,
-            id = nextId++,
-            seed = contentSeed(bitmap),
-        )
+        val normalized = toArgb8888(bitmap)
+        try {
+            LoadedPhoto(
+                bitmap = normalized,
+                label = "Photo",
+                sourceUri = uri.toString(),
+                sourceWidth = sourceWidth,
+                sourceHeight = sourceHeight,
+                id = nextId.getAndIncrement(),
+                seed = contentSeed(normalized),
+            )
+        } catch (t: Throwable) {
+            normalized.recycle()
+            throw t
+        }
     }
 
     /**
      * Decode [photo] at (about) [width] x [height], for saving.
      *
      * The editor bitmap is capped at [MAX_SOURCE_DIMENSION]; export re-decodes the original so
-     * applying an effect does not throw away most of the photo's resolution. Falls back to a
-     * downscaled copy of the editor bitmap when the source cannot be decoded again.
+     * applying an effect does not throw away most of the photo's resolution. An unavailable
+     * original fails explicitly; allocation failures reach the export downsize/retry path.
      */
     suspend fun decodeForExport(
         context: Context,
         photo: LoadedPhoto,
         width: Int,
         height: Int,
-    ): Bitmap = withContext(Dispatchers.IO) {
-        val decoded = runCatching {
+    ): Bitmap = decodeOwned(Bitmap::recycle) {
+        require(width > 0 && height > 0)
+        val decoded = try {
             val uri = photo.sourceUri?.let(Uri::parse)
             if (uri != null) decodeUriForExport(context, uri, width, height)
             else decodeAssetForExport(context, width, height)
-        }.getOrNull() ?: return@withContext downscaleFallback(photo.bitmap, width, height)
-        if (decoded.config == Bitmap.Config.ARGB_8888) {
-            decoded
-        } else {
-            decoded.copy(Bitmap.Config.ARGB_8888, false)?.also { decoded.recycle() }
-                ?: downscaleFallback(photo.bitmap, width, height)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            throw IOException("The original photo is unavailable. Select it again before saving.", failure)
+        }
+        toArgb8888(decoded)
+    }
+
+    /** Reclaims a decoded result if cancellation wins while switching back from the IO thread. */
+    private suspend fun <T : Any> decodeOwned(recycle: (T) -> Unit, decode: () -> T): T {
+        var decoded: T? = null
+        return try {
+            withContext(Dispatchers.IO) { decode().also { decoded = it } }
+        } catch (t: Throwable) {
+            decoded?.let(recycle)
+            throw t
+        }
+    }
+
+    private fun toArgb8888(bitmap: Bitmap): Bitmap {
+        if (bitmap.config == Bitmap.Config.ARGB_8888) return bitmap
+        return try {
+            bitmap.copy(Bitmap.Config.ARGB_8888, false)
+                ?: throw OutOfMemoryError("Could not allocate export pixels")
+        } finally {
+            bitmap.recycle()
         }
     }
 
@@ -127,25 +161,14 @@ object PhotoLoader {
             inPreferredConfig = Bitmap.Config.ARGB_8888
             inSampleSize = sampleSize(bounds.outWidth, bounds.outHeight, max(width, height))
         }
-        var bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
             ?: error("Could not decode demo photo")
-        if (bitmap.width != width || bitmap.height != height) {
-            val scaled = Bitmap.createScaledBitmap(bitmap, width, height, true)
-            if (scaled !== bitmap) bitmap.recycle()
-            bitmap = scaled
+        if (bitmap.width == width && bitmap.height == height) return bitmap
+        return try {
+            Bitmap.createScaledBitmap(bitmap, width, height, true)
+        } finally {
+            bitmap.recycle()
         }
-        return bitmap
-    }
-
-    private fun downscaleFallback(bitmap: Bitmap, width: Int, height: Int): Bitmap {
-        if (bitmap.width <= width && bitmap.height <= height) return bitmap
-        val scale = min(width.toFloat() / bitmap.width, height.toFloat() / bitmap.height)
-        return Bitmap.createScaledBitmap(
-            bitmap,
-            (bitmap.width * scale).roundToInt().coerceAtLeast(1),
-            (bitmap.height * scale).roundToInt().coerceAtLeast(1),
-            true,
-        )
     }
 
     private fun decodeByteArray(bytes: ByteArray, maxDimension: Int): Bitmap {
@@ -155,17 +178,21 @@ object PhotoLoader {
             inPreferredConfig = Bitmap.Config.ARGB_8888
             inSampleSize = sampleSize(bounds.outWidth, bounds.outHeight, maxDimension)
         }
-        var bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
             ?: error("Could not decode demo photo")
         val longest = max(bitmap.width, bitmap.height)
         if (longest > maxDimension) {
             val scale = maxDimension.toFloat() / longest
-            bitmap = Bitmap.createScaledBitmap(
-                bitmap,
-                (bitmap.width * scale).roundToInt().coerceAtLeast(1),
-                (bitmap.height * scale).roundToInt().coerceAtLeast(1),
-                true,
-            )
+            return try {
+                Bitmap.createScaledBitmap(
+                    bitmap,
+                    (bitmap.width * scale).roundToInt().coerceAtLeast(1),
+                    (bitmap.height * scale).roundToInt().coerceAtLeast(1),
+                    true,
+                )
+            } finally {
+                bitmap.recycle()
+            }
         }
         return bitmap
     }
@@ -185,11 +212,14 @@ object PhotoLoader {
     private fun contentSeed(bitmap: Bitmap): Long {
         val size = min(16, min(bitmap.width, bitmap.height)).coerceAtLeast(1)
         val small = Bitmap.createScaledBitmap(bitmap, size, size, true)
-        val pixels = IntArray(size * size)
-        small.getPixels(pixels, 0, size, 0, 0, size, size)
-        if (small !== bitmap) small.recycle()
-        var hash = 1125899906842597L
-        for (p in pixels) hash = 31 * hash + p
-        return hash and 0x7FFFFFFF
+        return try {
+            val pixels = IntArray(size * size)
+            small.getPixels(pixels, 0, size, 0, 0, size, size)
+            var hash = 1125899906842597L
+            for (p in pixels) hash = 31 * hash + p
+            hash and 0x7FFFFFFF
+        } finally {
+            if (small !== bitmap) small.recycle()
+        }
     }
 }
