@@ -3,6 +3,9 @@ package com.aliahad.photoeffects.diagnostics
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
+import com.aliahad.photoeffects.adjust.AdjustControl
+import com.aliahad.photoeffects.adjust.AdjustEffectFactory
+import com.aliahad.photoeffects.adjust.AdjustParams
 import com.aliahad.photoeffects.effect.EffectRegistry
 import com.aliahad.photoeffects.effect.EditComposition
 import com.aliahad.photoeffects.effect.EditStage
@@ -81,8 +84,51 @@ object RenderDiagnostics {
             if (result?.passes != true) failed++
         }
 
+        val adjustCases = listOf(
+            "adjust_color" to AdjustParams()
+                .with(AdjustControl.Exposure, 35)
+                .with(AdjustControl.Contrast, 20)
+                .with(AdjustControl.Saturation, 25),
+            "adjust_hsl" to AdjustParams()
+                .with(AdjustControl.HslRedHue, 100)
+                .with(AdjustControl.HslBlueSaturation, 70),
+            "adjust_detail" to AdjustParams()
+                .with(AdjustControl.Sharpen, 60)
+                .with(AdjustControl.Clarity, 40)
+                .with(AdjustControl.Dehaze, 30),
+            "adjust_blur" to AdjustParams()
+                .with(AdjustControl.GaussianBlur, 40)
+                .with(AdjustControl.Mist, 30)
+                .with(AdjustControl.RefocusAmount, 50)
+                .with(AdjustControl.FocusPoint, 35),
+            "adjust_optical" to AdjustParams()
+                .with(AdjustControl.Fisheye, 30)
+                .with(AdjustControl.RgbSplit, 40)
+                .with(AdjustControl.Aberration, 30),
+            "adjust_stylize" to AdjustParams()
+                .with(AdjustControl.Grain, 40)
+                .with(AdjustControl.Dust, 40)
+                .with(AdjustControl.Vignette, 40)
+                .with(AdjustControl.Vintage, 40),
+        )
+        for ((label, params) in adjustCases) {
+            val effect = AdjustEffectFactory.create(params)
+            val result = compare(
+                context,
+                effect,
+                opaqueBitmap,
+                opaquePixels,
+                width,
+                height,
+                label,
+            )
+            checked++
+            if (result?.passes != true) failed++
+        }
+
         Log.i(TAG, "Parity complete: checked=$checked failed=$failed")
         logTimings(context)
+        logAdjustTimings(context)
         transparentBitmap.recycle()
         opaqueBitmap.recycle()
     }
@@ -199,6 +245,38 @@ object RenderDiagnostics {
                 "timing ${effect.displayName}: CPU=${"%.1f".format(cpuMs)}ms " +
                     "(${"%.1f".format(cpuMs / megapixels)}ms/MP) " +
                     "GPU(readback)=${"%.1f".format(gpuMs)}ms$parity",
+            )
+        }
+        bitmap.recycle()
+    }
+
+    private fun logAdjustTimings(context: Context) {
+        val cases = listOf(
+            "Adjust colour" to AdjustParams().with(AdjustControl.Exposure, 25)
+                .with(AdjustControl.Saturation, 20),
+            "Adjust detail" to AdjustParams().with(AdjustControl.Sharpen, 50)
+                .with(AdjustControl.Clarity, 40),
+            "Adjust blur" to AdjustParams().with(AdjustControl.GaussianBlur, 40)
+                .with(AdjustControl.Mist, 30),
+        )
+        val pixels = syntheticSource(BENCH_WIDTH, BENCH_HEIGHT, transparent = false)
+        val bitmap = Bitmap.createBitmap(pixels, BENCH_WIDTH, BENCH_HEIGHT, Bitmap.Config.ARGB_8888)
+        val megapixels = BENCH_WIDTH.toDouble() * BENCH_HEIGHT / 1_000_000.0
+        for ((label, params) in cases) {
+            val effect = AdjustEffectFactory.create(params)
+            val cpuStart = System.nanoTime()
+            repeat(2) { effect.cpu.apply(pixels, BENCH_WIDTH, BENCH_HEIGHT, 1f, SEED) }
+            val cpuMs = (System.nanoTime() - cpuStart) / 2_000_000.0
+            val gpuStart = System.nanoTime()
+            val gpu = GpuReadback.render(
+                context, bitmap, effect.gpu, BENCH_WIDTH, BENCH_HEIGHT, SEED, 1f,
+            )
+            val gpuMs = (System.nanoTime() - gpuStart) / 1_000_000.0
+            Log.i(
+                TAG,
+                "timing $label: CPU=${"%.1f".format(cpuMs)}ms " +
+                    "(${"%.1f".format(cpuMs / megapixels)}ms/MP) " +
+                    "GPU(readback)=${"%.1f".format(gpuMs)}ms${if (gpu == null) " GPU=FAILED" else ""}",
             )
         }
         bitmap.recycle()

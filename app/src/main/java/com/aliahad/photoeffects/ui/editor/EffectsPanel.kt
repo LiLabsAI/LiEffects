@@ -2,7 +2,9 @@ package com.aliahad.photoeffects.ui.editor
 
 import android.graphics.Bitmap
 import android.util.LruCache
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -101,93 +103,193 @@ fun EffectsPanel(
     val photo = state.photo
     val isFilters = state.activeTool == EditorTool.Filters
     val catalogue = if (isFilters) FilterRegistry.all else EffectRegistry.all
+    val stage = if (state.panelStage == PanelStage.Edit && state.activePreset == null) {
+        PanelStage.Items
+    } else {
+        state.panelStage
+    }
     val otherStage = if (isFilters) {
         state.selectedEffect?.let { EditStage(it, state.selection?.intensity ?: it.defaultIntensity) }
     } else {
         state.selectedFilter?.let { EditStage(it, 100) }
     }
-    // Scale the photo once per photo instead of once per thumbnail card.
+    val adjustStage = state.selectedAdjust?.let { EditStage(it, 100) }
+    // Thumbnails are only needed while the preset cards are visible.
     val thumbnailSource = remember(photo?.id, photo?.bitmap) {
         photo?.bitmap?.let {
             EffectBitmapRenderer.downscale(it, EffectBitmapRenderer.THUMBNAIL_MAX_DIMENSION)
         }
     }
-    val thumbnails = rememberEffectThumbnails(photo, thumbnailSource, catalogue, otherStage, isFilters)
+    val thumbnails = if (stage == PanelStage.Items) {
+        rememberEffectThumbnails(
+            photo,
+            thumbnailSource,
+            catalogue,
+            otherStage,
+            adjustStage,
+            state.adjustParams.hashCode(),
+            isFilters,
+        )
+    } else {
+        emptyMap()
+    }
     val selectedEffect = state.activePreset
+    val title = when (stage) {
+        PanelStage.Categories -> if (isFilters) "Filters" else "Effects"
+        PanelStage.Items -> state.activeShelf.title
+        PanelStage.Edit -> selectedEffect?.displayName ?: "Edit"
+    }
+    val subtitle = when (stage) {
+        PanelStage.Categories -> "Choose a category"
+        PanelStage.Items -> "Tap to try · tap selected again to edit"
+        PanelStage.Edit -> selectedEffect?.summary ?: "Choose a preset"
+    }
     Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
-            .background(EditorColors.Panel),
+            .background(EditorColors.Panel)
+            .animateContentSize(),
     ) {
-        CategoryChips(
-            activeId = state.activeShelf.id,
-            shelves = if (isFilters) FilterRegistry.shelves else EffectRegistry.shelves,
-            onSelect = { state.selectShelf(it) },
-        )
-        val effects = state.effects
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            // Fit small variant shelves on screen; wider shelves scroll at the 92.dp cap.
-            val edgePadding = 16.dp
-            val gap = 10.dp
-            val fitWidth =
-                (maxWidth - edgePadding * 2 - gap * (effects.size - 1)) / effects.size.coerceAtLeast(1)
-            val cardWidth = fitWidth.coerceIn(48.dp, 92.dp)
-            val cardHeight = cardWidth * 1.22f
-            LazyRow(
-                modifier = Modifier.fillMaxWidth(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = edgePadding),
-                horizontalArrangement = Arrangement.spacedBy(gap),
-            ) {
-                items(effects, key = { it.id }) { effect ->
-                    EffectCard(
-                        effect = effect,
-                        thumbnail = thumbnails[effect.id],
-                        selected = selectedEffect?.id == effect.id,
-                        cardWidth = cardWidth,
-                        cardHeight = cardHeight,
-                        onClick = { if (isFilters) state.toggleFilter(effect) else state.toggleEffect(effect) },
+        EditorPanelHeader(
+            title = title,
+            subtitle = subtitle,
+            onBack = if (stage != PanelStage.Categories) {
+                { state.panelBack() }
+            } else null,
+            actions = {
+                if (selectedEffect != null && stage != PanelStage.Categories) {
+                    if (stage == PanelStage.Items) {
+                        EditorPanelAction(
+                            label = "Edit",
+                            enabled = true,
+                            description = "preset_edit",
+                            onClick = { state.editSelectedPreset() },
+                        )
+                    }
+                    EditorPanelAction(
+                        label = "Clear",
+                        enabled = true,
+                        description = "preset_clear",
+                        onClick = { state.clearSelectedPreset() },
                     )
                 }
-            }
-        }
-        AnimatedVisibility(
-            visible = selectedEffect != null,
-            enter = fadeIn() + expandVertically(),
-            exit = fadeOut() + shrinkVertically(),
-        ) {
-            if (selectedEffect != null) {
-                Column {
-                    if (isFilters) {
-                        Row(
-                            modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 10.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            },
+        )
+        AnimatedContent(
+            targetState = stage,
+            transitionSpec = { panelStageTransition() },
+            label = "preset_stage",
+        ) { current ->
+            when (current) {
+                PanelStage.Categories -> CategoryChips(
+                    activeId = state.activeShelf.id,
+                    shelves = if (isFilters) FilterRegistry.shelves else EffectRegistry.shelves,
+                    onSelect = { state.selectShelf(it) },
+                )
+
+                PanelStage.Items -> {
+                    val effects = state.effects
+                    BoxWithConstraints(Modifier.fillMaxWidth()) {
+                        // Fit small variant shelves on screen; wider shelves scroll at the 92.dp cap.
+                        val edgePadding = 16.dp
+                        val gap = 10.dp
+                        val fitWidth =
+                            (maxWidth - edgePadding * 2 - gap * (effects.size - 1)) /
+                                effects.size.coerceAtLeast(1)
+                        val cardWidth = fitWidth.coerceIn(48.dp, 92.dp)
+                        val cardHeight = cardWidth * 1.22f
+                        LazyRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                                horizontal = edgePadding,
+                            ),
+                            horizontalArrangement = Arrangement.spacedBy(gap),
                         ) {
-                            for (control in state.filterControls) {
-                                Text(
-                                    text = control.label,
-                                    color = if (state.activeFilterControl == control) EditorColors.Accent else EditorColors.TextSecondary,
-                                    fontSize = 12.sp,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(50))
-                                        .clickable { state.filterControl = control }
-                                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                                        .semantics {
-                                            contentDescription = "filter_control_${control.name.lowercase()}"
-                                            selected = state.activeFilterControl == control
-                                        },
+                            items(effects, key = { it.id }) { effect ->
+                                EffectCard(
+                                    effect = effect,
+                                    thumbnail = thumbnails[effect.id],
+                                    selected = selectedEffect?.id == effect.id,
+                                    cardWidth = cardWidth,
+                                    cardHeight = cardHeight,
+                                    onClick = {
+                                        if (selectedEffect?.id == effect.id) {
+                                            state.editSelectedPreset()
+                                        } else if (isFilters) {
+                                            state.selectFilter(effect)
+                                        } else {
+                                            state.selectEffect(effect)
+                                        }
+                                    },
                                 )
                             }
                         }
                     }
-                    IntensitySection(
-                        effect = selectedEffect,
-                        intensity = state.intensity,
-                        valueRange = if (isFilters) state.activeFilterControl.range else 0..100,
-                        onValueChange = { state.setIntensity(it) },
-                        onDragStart = { state.beginIntensityDrag() },
-                        onDragFinished = { state.commitIntensityDrag() },
-                    )
+                }
+
+                PanelStage.Edit -> if (selectedEffect != null) {
+                    Column {
+                        if (isFilters) {
+                            Row(
+                                modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 2.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                for (control in state.filterControls) {
+                                    Text(
+                                        text = control.label,
+                                        color = if (state.activeFilterControl == control) {
+                                            EditorColors.Accent
+                                        } else {
+                                            EditorColors.TextSecondary
+                                        },
+                                        fontSize = 12.sp,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(50))
+                                            .clickable { state.filterControl = control }
+                                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                                            .semantics {
+                                                contentDescription =
+                                                    "filter_control_${control.name.lowercase()}"
+                                                selected = state.activeFilterControl == control
+                                            },
+                                    )
+                                }
+                            }
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 18.dp, end = 18.dp, top = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = if (isFilters) state.activeFilterControl.label else "Intensity",
+                                color = EditorColors.TextMuted,
+                                fontSize = 11.sp,
+                            )
+                            Spacer(Modifier.weight(1f))
+                            Text(
+                                text = state.intensity.toString(),
+                                color = EditorColors.TextPrimary,
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier.semantics {
+                                    contentDescription = "intensity_value"
+                                },
+                            )
+                        }
+                        IntensitySlider(
+                            value = state.intensity,
+                            valueRange = if (isFilters) state.activeFilterControl.range else 0..100,
+                            onValueChange = { state.setIntensity(it) },
+                            onDragStart = { state.beginIntensityDrag() },
+                            onDragFinished = { state.commitIntensityDrag() },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(46.dp)
+                                .padding(horizontal = 18.dp),
+                        )
+                    }
                 }
             }
         }
@@ -201,6 +303,8 @@ private fun rememberEffectThumbnails(
     thumbnailSource: Bitmap?,
     catalogue: List<PhotoEffect>,
     otherStage: EditStage?,
+    adjustStage: EditStage?,
+    adjustKey: Int,
     isFilters: Boolean,
 ): Map<String, Bitmap> {
     val thumbnails by produceState<Map<String, Bitmap>>(
@@ -209,20 +313,22 @@ private fun rememberEffectThumbnails(
         thumbnailSource,
         catalogue,
         otherStage,
+        adjustStage,
+        adjustKey,
         isFilters,
     ) {
         value = emptyMap()
         val p = photo ?: return@produceState
         val source = thumbnailSource ?: p.bitmap
-        // Coalesce slider/selection churn before starting a expensive render pass.
-        if (otherStage != null) delay(90)
+        // Coalesce slider/selection churn before starting an expensive render pass.
+        if (otherStage != null || adjustStage != null) delay(160)
         val job = currentCoroutineContext()[Job]
         val otherKey = otherStage?.let {
             "${it.effect.id}:${it.effect.gpu.uniforms.hashCode()}:${it.intensity}"
         } ?: "none"
         for (effect in catalogue) {
             ensureActive()
-            val key = "${p.id}|$isFilters|${effect.id}|$otherKey"
+            val key = "${p.id}|$isFilters|${effect.id}|$adjustKey|$otherKey"
             val cached = thumbnailCache.get(key)
             if (cached != null) {
                 value = value + (effect.id to cached)
@@ -230,8 +336,11 @@ private fun rememberEffectThumbnails(
             }
             val rendered = withContext(Dispatchers.Default) {
                 val stage = EditStage(effect, effect.defaultIntensity)
-                val composed = if (isFilters) EditComposition.compose(stage, otherStage)
-                    else EditComposition.compose(otherStage, stage)
+                val composed = if (isFilters) {
+                    EditComposition.compose(stage, adjustStage, otherStage)
+                } else {
+                    EditComposition.compose(otherStage, adjustStage, stage)
+                }
                 EffectBitmapRenderer.renderThumbnail(
                     source = source,
                     effect = requireNotNull(composed),
@@ -451,6 +560,7 @@ fun IntensitySlider(
     onDragFinished: () -> Unit,
     modifier: Modifier = Modifier,
     valueRange: IntRange = 0..100,
+    neutralValue: Int = 0,
 ) {
     var widthPx by remember { mutableStateOf(1f) }
     fun valueFor(x: Float): Int {
@@ -502,7 +612,7 @@ fun IntensitySlider(
         fun fraction(v: Int) = (v.coerceIn(valueRange) - valueRange.first).toFloat() /
             (valueRange.last - valueRange.first)
         val valueX = pad + usable * fraction(value)
-        val neutralX = pad + usable * fraction(0)
+        val neutralX = pad + usable * fraction(neutralValue)
 
         // Hairline track
         drawLine(

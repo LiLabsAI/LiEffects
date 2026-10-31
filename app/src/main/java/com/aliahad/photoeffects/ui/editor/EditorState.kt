@@ -6,6 +6,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.aliahad.photoeffects.adjust.AdjustCategory
+import com.aliahad.photoeffects.adjust.AdjustControl
+import com.aliahad.photoeffects.adjust.AdjustEffectFactory
+import com.aliahad.photoeffects.adjust.AdjustParams
+import com.aliahad.photoeffects.adjust.HslBand
+import com.aliahad.photoeffects.adjust.HslComponent
 import com.aliahad.photoeffects.effect.EffectRegistry
 import com.aliahad.photoeffects.effect.EffectShelf
 import com.aliahad.photoeffects.effect.PhotoEffect
@@ -34,6 +40,9 @@ enum class EditorTool(val label: String) {
     Overlay("Overlay"),
 }
 
+/** Progressive bottom-panel navigation: categories → items → the active control. */
+enum class PanelStage { Categories, Items, Edit }
+
 /** One applied effect + its slider position. */
 data class EffectSelection(val effectId: String, val intensity: Int)
 
@@ -43,7 +52,11 @@ data class FilterSelection(
     val highlights: Int = 0, val shadows: Int = 0,
     val aberration: Int = 0,
 )
-private data class EditSnapshot(val effect: EffectSelection?, val filter: FilterSelection?)
+private data class EditSnapshot(
+    val effect: EffectSelection?,
+    val filter: FilterSelection?,
+    val adjust: AdjustParams,
+)
 
 /**
  * Editor state holder: photo, selected effect, intensity, undo history, save flow.
@@ -61,12 +74,22 @@ class EditorState(private val context: Context) {
         private set
     var filterSelection by mutableStateOf<FilterSelection?>(null)
         private set
+    var adjustParams by mutableStateOf(AdjustParams())
+        private set
+    var adjustCategory by mutableStateOf(AdjustCategory.Light)
+    var adjustControl by mutableStateOf(AdjustControl.Exposure)
+    var hslBand by mutableStateOf(HslBand.Red)
+    var hslComponent by mutableStateOf(HslComponent.Hue)
     var filterControl by mutableStateOf(FilterControl.Strength)
     var activeFilterShelfId by mutableStateOf(FilterRegistry.defaultShelf.id)
     /** Currently selected Effects-panel shelf (family or category); see [EffectRegistry.shelves]. */
     var activeShelfId by mutableStateOf(EffectRegistry.defaultShelf.id)
     var activeTool by mutableStateOf(EditorTool.Effects)
+    var panelStage by mutableStateOf(PanelStage.Categories)
+        private set
     var showOriginal by mutableStateOf(false)
+        private set
+    var adjustDragging by mutableStateOf(false)
         private set
     var isSaving by mutableStateOf(false)
         private set
@@ -101,22 +124,38 @@ class EditorState(private val context: Context) {
         }
     }
 
+    val selectedAdjust: PhotoEffect? by derivedStateOf {
+        if (adjustParams.isIdentity) null else AdjustEffectFactory.create(adjustParams)
+    }
+
     /** One immutable render snapshot shared by preview, export planning and saving. */
     val renderEffect: PhotoEffect? by derivedStateOf {
         EditComposition.compose(
             selectedFilter?.let { EditStage(it, 100) },
+            selectedAdjust?.let { EditStage(it, 100) },
             selectedEffect?.let { EditStage(it, selection?.intensity ?: it.defaultIntensity) },
         )
     }
 
     val activePreset: PhotoEffect?
-        get() = if (activeTool == EditorTool.Filters) selectedFilter else selectedEffect
+        get() = when (activeTool) {
+            EditorTool.Filters -> selectedFilter
+            EditorTool.Adjust -> selectedAdjust
+            else -> selectedEffect
+        }
+
+    val adjustValue: Int
+        get() = adjustParams.value(adjustControl)
+
+    val adjustEditedCount: Int
+        get() = adjustParams.editedControlCount
 
     val strengthLabel: String
         get() = listOfNotNull(
             filterSelection?.let {
                 "Filter ${it.strength}%" + if (FilterControl.Intensity in filterControls) " · Intensity ${it.intensity}%" else ""
             },
+            if (!adjustParams.isIdentity) "Adjust ${adjustParams.editedControlCount} edit(s)" else null,
             selection?.let { "Effect ${it.intensity}%" },
         ).joinToString(" · ")
 
@@ -166,11 +205,17 @@ class EditorState(private val context: Context) {
                 photo = it
                 selection = null
                 filterSelection = null
+                adjustParams = AdjustParams()
+                adjustCategory = AdjustCategory.Light
+                adjustControl = AdjustControl.Exposure
+                hslBand = HslBand.Red
+                hslComponent = HslComponent.Hue
                 dragSnapshot = null
                 history.clear()
                 activeShelfId = EffectRegistry.defaultShelf.id
                 activeFilterShelfId = FilterRegistry.defaultShelf.id
                 resetExportResolution()
+                panelStage = PanelStage.Categories
             }
             .onFailure { message = "Could not load that photo" }
         isLoadingPhoto = false
@@ -183,21 +228,65 @@ class EditorState(private val context: Context) {
                 photo = it
                 selection = null
                 filterSelection = null
+                adjustParams = AdjustParams()
+                adjustCategory = AdjustCategory.Light
+                adjustControl = AdjustControl.Exposure
+                hslBand = HslBand.Red
+                hslComponent = HslComponent.Hue
                 dragSnapshot = null
                 history.clear()
                 resetExportResolution()
+                panelStage = PanelStage.Categories
             }
             .onFailure { message = "Could not load demo photo" }
         isLoadingPhoto = false
     }
 
-    fun toggleEffect(effect: PhotoEffect) {
-        pushHistory()
-        selection = if (selection?.effectId == effect.id) {
-            null
+    fun selectTool(tool: EditorTool) {
+        if (activeTool == tool) {
+            if (panelStage != PanelStage.Categories) panelStage = PanelStage.Categories
         } else {
-            EffectSelection(effect.id, effect.defaultIntensity)
+            activeTool = tool
+            panelStage = PanelStage.Categories
         }
+    }
+
+    fun panelBack() {
+        panelStage = when (panelStage) {
+            PanelStage.Edit -> PanelStage.Items
+            PanelStage.Items -> PanelStage.Categories
+            PanelStage.Categories -> PanelStage.Categories
+        }
+    }
+
+    /**
+     * One tap auditions a preset and stays in the card browser; tapping the already-selected
+     * preset is the second half of the double-tap and opens its manual controls.
+     */
+    fun selectEffect(effect: PhotoEffect) {
+        if (selection?.effectId == effect.id) {
+            panelStage = PanelStage.Edit
+            return
+        }
+        pushHistory()
+        selection = EffectSelection(effect.id, effect.defaultIntensity)
+        panelStage = PanelStage.Items
+    }
+
+    fun editSelectedPreset() {
+        if (activePreset != null) panelStage = PanelStage.Edit
+    }
+
+    fun clearSelectedPreset() {
+        if (activeTool == EditorTool.Adjust) {
+            resetAdjust()
+            return
+        }
+        val hasSelection = if (activeTool == EditorTool.Filters) filterSelection != null else selection != null
+        if (!hasSelection) return
+        pushHistory()
+        if (activeTool == EditorTool.Filters) filterSelection = null else selection = null
+        panelStage = PanelStage.Items
     }
 
     fun setIntensity(value: Int) {
@@ -234,13 +323,16 @@ class EditorState(private val context: Context) {
         val previous = history.removeLast()
         selection = previous.effect
         filterSelection = previous.filter
+        adjustParams = previous.adjust
     }
 
     fun resetAll() {
-        if (selection != null || filterSelection != null) {
+        if (selection != null || filterSelection != null || !adjustParams.isIdentity) {
             pushHistory()
             selection = null
             filterSelection = null
+            adjustParams = AdjustParams()
+            panelStage = PanelStage.Categories
             message = "Edits reset"
         } else {
             message = "Nothing to reset"
@@ -310,7 +402,7 @@ class EditorState(private val context: Context) {
         recordHistory(snapshot())
     }
 
-    private fun snapshot() = EditSnapshot(selection, filterSelection)
+    private fun snapshot() = EditSnapshot(selection, filterSelection, adjustParams)
 
     private fun recordHistory(snapshot: EditSnapshot) {
         history.addLast(snapshot)
@@ -327,21 +419,96 @@ class EditorState(private val context: Context) {
         if (activeTool == EditorTool.Filters) {
             if (FilterRegistry.shelfById(shelfId) != null) activeFilterShelfId = shelfId
         } else if (EffectRegistry.shelfById(shelfId) != null) activeShelfId = shelfId
+        panelStage = PanelStage.Items
     }
 
-    fun toggleFilter(filter: PhotoEffect) {
+    fun selectFilter(filter: PhotoEffect) {
         val params = FilterRegistry.paramsById(filter.id) ?: return
+        if (filterSelection?.filterId == filter.id) {
+            panelStage = PanelStage.Edit
+            return
+        }
         pushHistory()
-        filterSelection = if (filterSelection?.filterId == filter.id) null
-            else FilterSelection(
-                filter.id, (params.strength * 100).roundToInt(), params.sharpen, params.intensity,
-                params.grain, params.highlights, params.shadows, params.aberration,
-            )
+        filterSelection = FilterSelection(
+            filter.id, (params.strength * 100).roundToInt(), params.sharpen, params.intensity,
+            params.grain, params.highlights, params.shadows, params.aberration,
+        )
         filterControl = params.controls.first()
+        panelStage = PanelStage.Items
+    }
+
+    fun selectAdjustCategory(category: AdjustCategory) {
+        adjustCategory = category
+        adjustControl = if (category == AdjustCategory.Hsl) {
+            AdjustControl.forHsl(hslBand, hslComponent)
+        } else {
+            AdjustControl.byCategory(category).first()
+        }
+        panelStage = PanelStage.Items
+    }
+
+    fun selectAdjustControl(control: AdjustControl) {
+        adjustControl = control
+        val band = AdjustControl.hslBandOf(control)
+        val component = AdjustControl.hslComponentOf(control)
+        if (band != null && component != null) {
+            hslBand = band
+            hslComponent = component
+        }
+        panelStage = PanelStage.Edit
+    }
+
+    fun selectHslBand(band: HslBand) {
+        hslBand = band
+        adjustControl = AdjustControl.forHsl(band, hslComponent)
+        panelStage = PanelStage.Items
+    }
+
+    fun selectHslComponent(component: HslComponent) {
+        hslComponent = component
+        adjustControl = AdjustControl.forHsl(hslBand, component)
+        panelStage = PanelStage.Edit
+    }
+
+    fun setAdjustValue(value: Int) {
+        val clamped = value.coerceIn(adjustControl.range)
+        adjustParams = adjustParams.with(adjustControl, clamped)
+    }
+
+    fun setAdjustControlValue(control: AdjustControl, value: Int) {
+        selectAdjustControl(control)
+        setAdjustValue(value)
+    }
+
+    fun beginAdjustDrag() {
+        dragSnapshot = snapshot()
+        adjustDragging = true
+    }
+
+    fun commitAdjustDrag() {
+        adjustDragging = false
+        val before = dragSnapshot ?: return
+        dragSnapshot = null
+        if (before != snapshot()) recordHistory(before)
+    }
+
+    fun resetAdjustCategory() {
+        if (adjustParams.isIdentity) return
+        pushHistory()
+        adjustParams = adjustParams.reset(adjustCategory)
+    }
+
+    fun resetAdjust() {
+        if (adjustParams.isIdentity) return
+        pushHistory()
+        adjustParams = AdjustParams()
     }
 
     fun clearActivePreset() {
-        val current = activePreset ?: return
-        if (activeTool == EditorTool.Filters) toggleFilter(current) else toggleEffect(current)
+        if (activeTool == EditorTool.Adjust) {
+            resetAdjust()
+            return
+        }
+        clearSelectedPreset()
     }
 }

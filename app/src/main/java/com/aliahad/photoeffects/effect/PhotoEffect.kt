@@ -22,6 +22,8 @@ fun interface CpuEffect {
 data class GpuProgram(
     val agslSource: String,
     val uniforms: Map<String, Float> = emptyMap(),
+    /** Float-array uniforms (HSL bands); pushed via RuntimeShader.setFloatUniform(String, float[]). */
+    val vectorUniforms: Map<String, FloatArray> = emptyMap(),
     /**
      * Extra asset-backed shader inputs: uniform shader name -> app asset path.
      * Used by SENSUAL for the bundled PREQUEL `adj-Blur` mask (`uMask` -> `blurmask.jpg`),
@@ -58,6 +60,7 @@ data class GpuProgram(
 data class GpuPass(
     val agslSource: String,
     val uniforms: Map<String, Float> = emptyMap(),
+    val vectorUniforms: Map<String, FloatArray> = emptyMap(),
     val extraShaderAssets: Map<String, String> = emptyMap(),
     val pixelSpaceShaders: Set<String> = emptySet(),
     val baseShaderInputs: Set<String> = emptySet(),

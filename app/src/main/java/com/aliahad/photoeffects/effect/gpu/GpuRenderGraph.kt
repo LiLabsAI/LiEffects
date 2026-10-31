@@ -66,6 +66,7 @@ internal class GpuRenderGraph private constructor(
                 GpuEffectRenderer.applyUniforms(
                     node.shader,
                     pass.uniforms,
+                    pass.vectorUniforms,
                     intensityOverride = 1f,
                     intensity = intensity,
                     photoSeed = seed,

@@ -8,7 +8,9 @@ Built with Kotlin and Jetpack Compose, minSdk 36 / targetSdk 37.
 - 32 original filter recipes: G7X, Dim, Vanilla, Cine Film, Teal Tone and Burgundy with three variants each; Insomnia with six; Chicago with eight.
 - Recipe-specific controls: Filter / Sharpen, Insomnia’s Filter / Intensity / Grain, Cine Film’s Filter / Grain, Chicago’s variant-specific tone / aberration controls, and Teal Tone / Burgundy’s Filter strength.
 - Insomnia Intensity controls horizontal motion softness; colour strength and grain remain independent.
-- One optional Effect is applied after the selected filter.
+- An Adjust layer with eight categories and 57 controls: Light, Color, HSL, Details, Stylize,
+  Refocus, Optical and Blur.
+- One optional Effect is applied after the selected filter and Adjust layer.
 - 25 Effects across Dusty, Halation, Yesterday, Sensual, Kuji and Focal.
 - Current-photo thumbnails, press-and-hold comparison, undo and reset.
 - Source-limited export resolution, JPEG quality and metadata options.
@@ -43,6 +45,31 @@ or spatial stages.
 The current pipeline does not provide a RAW or HDR working space; picked images are normalized
 to sRGB.
 
+The bottom panel is a progressive disclosure surface, not a permanently tall stack. It has three
+stages: **Categories → Items → Edit**. At Categories only the shelf/category row is mounted; after
+choosing a category the cards or control chips replace it. For Effects and Filters, one tap
+auditions a preset and **stays in the card browser**, so presets can be compared quickly; tapping
+the already-selected preset again opens Edit, and the header also exposes explicit Edit/Clear
+actions. An Adjust category opens its control chips, and choosing a control goes directly to
+Edit. `AnimatedContent` slides/fades between stages and `animateContentSize` returns the freed
+height to the photo. The header chevron and the bottom back button walk the stages in reverse.
+This mirrors PREQUEL's full-bleed photo plus compact one-slider panel while removing our previous
+simultaneous category/cards/controls stack.
+
+The Adjust layer is one shared stage rather than a preset shelf. It exposes 57 controls across
+eight categories, with an original analytic implementation (no PREQUEL LUTs or assets):
+Light and Color pointwise corrections, six-band HSL hue/saturation/lightness, detail
+unsharp/clarity/dehaze, stylize grain/dust/vignette/vintage, a vertical tilt-shift Refocus,
+optical fisheye/RGB split/aberration, and mist/glow/gaussian/masked/zoom/radial/directional
+blur. Signed controls use −100…100, unipolar 0…100, and Refocus position/range default to 50.
+The stage has no master intensity; the panel uses category/control chips and one active slider,
+with HSL band/component chips. Its GPU plan is colour/HSL → optional detail → optional
+blur/refocus → optical/stylize finish; the CPU renderer uses the same order. Noise uses the
+bounded 1600-scale hash from the filter grain engine, and spatial taps/radii match the AGSL
+passes. Detail/blur pass bits become active on first non-neutral use and use a cache-stable
+topology while dragging. The panel provides reset-all and undo; the Adjust stage is composed
+between the filter and effect (`Filter → Adjust → Effect`).
+
 The preview is an explicit **offscreen pass graph**. Each filter or effect stage records into its
 own `RenderNode`; the next pass consumes that layer as its `content` shader. Previously every
 stage was bound as a child shader of the next stage, so a blur tap in the final stage re-ran the
@@ -58,8 +85,9 @@ control changes and stop cooperatively between rows. The ambient backdrop is a t
 copy instead of a live full-screen blur, and the date stamp is rasterized once per size/date
 instead of drawing hundreds of gradients each frame.
 
-One immutable edit composition supplies both backends with the same filter-before-effect
-order and independent strengths. Export re-decodes the original source at the planned size;
+One immutable edit composition supplies both backends with the same
+filter → adjust → effect order and independent strengths. Export re-decodes the original source
+at the planned size;
 it does not save the preview. A heap budget includes intermediate buffers and caps resolution
 for expensive effects. Directional filters reserve 32 bytes per pixel, including their
 floating-point intermediate; the aberration path adds one graded ARGB frame. JPEG Low / Medium /
@@ -80,10 +108,11 @@ not a replacement for the deterministic Kotlin export oracle.
 ```
 
 The JVM suite covers deterministic rendering, existing effect baselines, catalogue validation,
-independent controls, composition and export planning. `FilterGpuInstrumentedTest` compares
-all filter shaders, filter-before-effect composition and the Insomnia control endpoints
-against their CPU renderers through real GPU readback on an emulator. There are 130 JVM
-tests and seven GPU tests, including mixed-alpha edge sampling.
+independent controls, Adjust categories/spatial stages, three-stage composition and export
+planning. `FilterGpuInstrumentedTest` and `AdjustGpuInstrumentedTest` compare filter and Adjust
+shaders, composition and control endpoints against their CPU renderers through real GPU readback
+on an emulator. There are 142 JVM tests and 11 GPU parity tests, including mixed-alpha edge
+sampling.
 
 The connected USB phone rejects test APK installation. Use its app UI for controls, comparison
 and export checks. The debug APK is `app/build/outputs/apk/debug/app-debug.apk`.
@@ -114,7 +143,12 @@ suite.
 | `java/com/aliahad/photoeffects/filter/FilterGrain.kt` | Shared deterministic grain field, mirrored in AGSL |
 | `java/com/aliahad/photoeffects/filter/DirectionalFocus.kt` | CPU and AGSL directional blur with local detail |
 | `java/com/aliahad/photoeffects/filter/FilterSoftFocus.kt` | Premultiplied bilinear sampling and local detail |
-| `java/com/aliahad/photoeffects/effect/EditComposition.kt` | Stage order, strengths and combined memory allowance |
+| `java/com/aliahad/photoeffects/adjust/AdjustParams.kt` | 57-control Adjust model, plans and uniform mapping |
+| `java/com/aliahad/photoeffects/adjust/AdjustAgsl.kt` | Colour/HSL, detail, blur/refocus and finish passes |
+| `java/com/aliahad/photoeffects/adjust/cpu/CpuAdjustRenderer.kt` | Deterministic Adjust CPU mirror |
+| `java/com/aliahad/photoeffects/ui/editor/AdjustPanel.kt` | Adjust categories, HSL chips and active slider |
+| `java/com/aliahad/photoeffects/ui/editor/EditorPanelChrome.kt` | Progressive panel header and stage transitions |
+| `java/com/aliahad/photoeffects/effect/EditComposition.kt` | Filter → Adjust → Effect stage order and allowance |
 | `java/com/aliahad/photoeffects/effect/gpu/GpuRenderGraph.kt` | Offscreen RenderNode pass graph and asset binding |
 | `java/com/aliahad/photoeffects/effect/gpu/GpuEffectRenderer.kt` | AGSL compilation cache, uniforms and shader inputs |
 | `java/com/aliahad/photoeffects/effect/gpu/GpuReadback.kt` | HardwareRenderer readback for diagnostics/tests |
@@ -142,7 +176,10 @@ claimed as original artwork. Detailed research provenance remains in the private
 Broader visual validation across skin tones, lighting, source sizes and devices still remains.
 The 640-px diagnostic baseline shows that noise-heavy CPU effects (Dusty/Sensual) are dominated
 by per-pixel trigonometric hashing and still need a noise-texture or full native-kernel pass
-before 12 MP exports are fast; the native blur work is a first step, not the end state. Alpha
-semantics for legacy transparent inputs and 16-bit/high-precision intermediates are also future
-work. The photo picker may strip source GPS before the editor receives it; Keep metadata
+before 12 MP exports are fast; the native blur work is a first step, not the end state. Adjust
+spatial controls use the same 9-tap support in CPU and AGSL; optical resampling remains a
+per-pixel approximation at extreme edges, and advanced controls (Brilliance, Push-pull, HDR,
+Ultrasharp, Midtone, Vintage, Fisheye and zoom/radial/directional blur) still need visual tuning.
+Alpha semantics for legacy transparent inputs and 16-bit/high-precision intermediates are also
+future work. The photo picker may strip source GPS before the editor receives it; Keep metadata
 can copy only the tags actually available to the app.

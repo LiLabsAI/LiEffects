@@ -61,6 +61,7 @@ object GpuEffectRenderer {
     ) = applyUniforms(
         shader,
         program.uniforms,
+        program.vectorUniforms,
         program.intensityOverride,
         intensity,
         photoSeed,
@@ -72,6 +73,7 @@ object GpuEffectRenderer {
     fun applyUniforms(
         shader: RuntimeShader,
         uniforms: Map<String, Float>,
+        vectorUniforms: Map<String, FloatArray> = emptyMap(),
         intensityOverride: Float?,
         intensity: Float,
         photoSeed: Long,
@@ -94,6 +96,15 @@ object GpuEffectRenderer {
         )
         for ((name, value) in uniforms) {
             if (name != DustyUniforms.SEED) shader.setFloatUniform(name, value)
+        }
+        for ((name, values) in vectorUniforms) {
+            // float2/3/4 uniforms use the vector overloads; float[] uniforms use the array form.
+            when (values.size) {
+                2 -> shader.setFloatUniform(name, values[0], values[1])
+                3 -> shader.setFloatUniform(name, values[0], values[1], values[2])
+                4 -> shader.setFloatUniform(name, values[0], values[1], values[2], values[3])
+                else -> shader.setFloatUniform(name, values)
+            }
         }
     }
 

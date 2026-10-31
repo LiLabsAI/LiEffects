@@ -1,16 +1,20 @@
 package com.aliahad.photoeffects.effect
 
-/** One immutable stage of the editor's filter-before-effect rendering pipeline. */
+/** One immutable stage of the editor's filter → adjust → effect rendering pipeline. */
 data class EditStage(val effect: PhotoEffect, val intensity: Int)
 
 /**
- * Combines independent Filter / Effect selections into the existing bitmap/export contract.
- * Both backends use precisely the same stage order and strengths. The extra pixel allowance
- * covers the intermediate ARGB buffer while the second CPU renderer runs.
+ * Combines independent Filter / Adjust / Effect selections into the existing bitmap/export
+ * contract. Both backends use precisely the same stage order and strengths. The extra pixel
+ * allowance covers the intermediate ARGB buffers while the following CPU renderers run.
  */
 object EditComposition {
-    fun compose(filter: EditStage?, effect: EditStage?): PhotoEffect? {
-        val stages = listOfNotNull(filter, effect)
+
+    fun compose(filter: EditStage?, effect: EditStage?): PhotoEffect? =
+        compose(filter, null, effect)
+
+    fun compose(filter: EditStage?, adjust: EditStage?, effect: EditStage?): PhotoEffect? {
+        val stages = listOfNotNull(filter, adjust, effect)
         if (stages.isEmpty()) return null
         var program: GpuProgram? = null
         for (stage in stages) {
@@ -20,6 +24,7 @@ object EditComposition {
             )
         }
         val last = stages.last().effect
+        val stampStage = stages.firstOrNull { it.effect.stamp != null }
         return PhotoEffect(
             spec = last.spec.copy(
                 id = stages.joinToString("+") { it.effect.id },
@@ -41,10 +46,10 @@ object EditComposition {
             },
             gpu = requireNotNull(program),
             summary = stages.joinToString(" · ") { it.effect.summary },
-            stamp = effect?.effect?.stamp,
-            stampIntensity = (effect?.intensity ?: 0).coerceIn(0, 100) / 100f,
+            stamp = stampStage?.effect?.stamp,
+            stampIntensity = (stampStage?.intensity ?: 0).coerceIn(0, 100) / 100f,
             exportBytesPerPixel = stages.maxOf { it.effect.exportBytesPerPixel } +
-                if (stages.size > 1) 8 else 0,
+                8 * (stages.size - 1),
         )
     }
 }

@@ -4,9 +4,11 @@
 
 Android photo editor (`com.aliahad.photoeffects`, single `:app` module, Kotlin + Compose,
 minSdk 36 / target 37) that reimplements PREQUEL-style effects: 25 presets across six families
-(Dusty, Halation, Yesterday, Sensual, Kuji, Focal). Every effect exists twice — an AGSL
-`RuntimeShader` for the live preview and a deterministic CPU mirror used for thumbnails, JVM
-tests and the Save export. Saving mirrors PREQUEL's export sheet: resolution tiers (never above
+(Dusty, Halation, Yesterday, Sensual, Kuji, Focal), 32 catalogue-driven filters, and an Adjust
+layer with 8 categories / 57 controls (Light, Color, HSL, Details, Stylize, Refocus, Optical,
+Blur). Every look exists twice — an AGSL `RuntimeShader` for the live preview and a deterministic
+CPU mirror used for thumbnails, JVM tests and the Save export. The render order is
+Filter → Adjust → Effect. Saving mirrors PREQUEL's export sheet: resolution tiers (never above
 the source), Low/Medium/High JPEG (40/75/95), and Override/Keep metadata.
 
 Future goal: close the remaining gap to PREQUEL (`com.prequel.app` 2.5.0) while staying a
@@ -23,10 +25,21 @@ Instrumented tests exist but cannot run on the test device: its ROM rejects test
 ## Invariants
 
 - Change a GPU shader and its CPU mirror together; exports and tests use the CPU path, so drift
-  silently degrades saved photos.
+  silently degrades saved photos. Adjust controls share one stage and one plan; keep
+  `AdjustParams`, `AdjustPlan`, the CPU passes and the AGSL passes in sync.
+- Keep Filter first. Filter shaders bind `uSource`/`uOriginal` only when they are stage 0;
+  Adjust is stage 1 and Effect is stage 2. Adjust has no master intensity (composed at 100).
 - Every `PhotoEffect` must declare `exportBytesPerPixel`; `ExportBudget` caps the planned export
   size by heap. Never bypass the budget or export the editor preview bitmap — `PhotoSaver`
-  re-decodes the source at the planned size.
+  re-decodes the source at the planned size. Adjust's value is plan-dependent (24/36/56/68
+  B/px) and composition adds one intermediate allowance per extra stage.
+- Adjust noise must use bounded `FilterGrain`-style hashing, not per-pixel trigonometry; the
+  spatial passes must use the same taps/radii in CPU and AGSL.
+- The bottom panel is progressive (`PanelStage.Categories → Items → Edit`). Keep only the
+  current stage mounted, preserve the header/bottom back path, and let the photo reclaim the
+  animated panel height. For Effects/Filters, a single tap auditions a preset and stays in
+  Items; tapping the selected preset again (or the header Edit action) opens Edit. Adjust
+  control selection opens Edit directly.
 - `docs/` holds reverse-engineering evidence and is gitignored by design. Keep the GitHub repo
   (`aliahadmd/Photoeffects`) private and app-source-only.
 - Do not commit, push, or create releases unless the user explicitly asks.

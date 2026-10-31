@@ -96,24 +96,37 @@ fun EditorScreen(
                 }
             }
 
-            EffectsPanel(state = state)
+            if (state.activeTool == EditorTool.Adjust) {
+                AdjustPanel(state = state)
+            } else {
+                EffectsPanel(state = state)
+            }
 
             EditorToolBar(
                 activeTool = state.activeTool,
                 hasEffect = state.activePreset != null,
                 onSelectTool = { tool ->
-                    if (tool == EditorTool.Effects || tool == EditorTool.Filters) {
-                        state.activeTool = tool
+                    if (tool == EditorTool.Effects || tool == EditorTool.Filters || tool == EditorTool.Adjust) {
+                        state.selectTool(tool)
                     } else {
                         state.showMessage("${tool.label} is coming soon")
                     }
                 },
                 onBack = {
-                    val selected = state.activePreset
-                    if (selected != null) {
-                        state.clearActivePreset()
+                    if (state.panelStage != PanelStage.Categories) {
+                        state.panelBack()
                     } else {
-                        state.showMessage("Choose a ${if (state.activeTool == EditorTool.Filters) "filter" else "preset"} below")
+                        val selected = state.activePreset
+                        if (selected != null) {
+                            state.clearActivePreset()
+                        } else {
+                            val label = when (state.activeTool) {
+                                EditorTool.Filters -> "filter"
+                                EditorTool.Adjust -> "adjustment"
+                                else -> "preset"
+                            }
+                            state.showMessage("Choose a $label below")
+                        }
                     }
                 },
             )
