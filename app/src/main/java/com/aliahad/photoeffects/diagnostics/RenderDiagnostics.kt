@@ -42,6 +42,8 @@ object RenderDiagnostics {
     fun run(context: Context) {
         Log.i(TAG, "Starting render diagnostics (native blur=${NativeBlur.available})")
         checkNativeBlur()
+        CanvasDiagnostics.run(context)
+        CreativeEffectsDiagnostics.run(context)
         val width = WIDTH
         val height = HEIGHT
         val transparent = syntheticSource(width, height, transparent = true)
@@ -85,9 +87,9 @@ object RenderDiagnostics {
         }
 
         val compositions = listOf(
-            "insomnia_1+dusty_1" to pair("insomnia_1", "dusty_1"),
-            "chicago_2+halation_1" to pair("chicago_2", "halation_1"),
-            "g7x_1+yesterday_1" to pair("g7x_1", "yesterday_1"),
+            "driftglass_1+motes_1" to pair("driftglass_1", "motes_1"),
+            "graphite_2+lumen_1" to pair("graphite_2", "lumen_1"),
+            "lucent_1+daymark_1" to pair("lucent_1", "daymark_1"),
         )
         for ((label, pair) in compositions) {
             val composed = pair ?: continue
@@ -190,16 +192,16 @@ object RenderDiagnostics {
      * Legacy envelopes characterize the fixed 160x107 adversarial fixture, with headroom over
      * the captured device baseline. These are regression alarms, not tolerances for exact mirrors.
      * Sparse GPU taps, CPU box/Gaussian kernels, sin-hash grain, and differently sized paper
-     * frames remain visible in the measured values. Focal shares its kernel and only allows the
+     * frames remain visible in the measured values. Prism shares its kernel and only allows the
      * small LUT/texture quantization outliers measured on the target device.
      */
     private fun policyFor(effect: PhotoEffect): Policy = when (effect.spec.familyId) {
-        "Dusty" -> Policy(2.5, 160, reason = "sparse blur and sin-hash grain")
-        "Halation" -> Policy(1.5, 255, reason = "sparse halo and edge masks versus CPU box fields")
-        "Yesterday" -> Policy(12.0, 160, reason = "sparse preblur and sin-hash grain; stamp region excluded")
-        "Sensual" -> Policy(12.0, 150, reason = "sparse GPU blur versus three-box CPU Gaussian")
-        "Kuji" -> Policy(2.0, 180, reason = "frame resampling and sin-hash grain")
-        "Focal" -> Policy(0.8, 8, reason = "LUT and texture quantization")
+        "Motes" -> Policy(2.5, 160, reason = "sparse blur and sin-hash grain")
+        "Lumen" -> Policy(1.5, 255, reason = "sparse halo and edge masks versus CPU box fields")
+        "Daymark" -> Policy(12.0, 160, reason = "sparse preblur and sin-hash grain; stamp region excluded")
+        "Velour" -> Policy(12.0, 150, reason = "sparse GPU blur versus three-box CPU Gaussian")
+        "Paperlight" -> Policy(2.0, 180, reason = "frame resampling and sin-hash grain")
+        "Prism" -> Policy(0.8, 8, reason = "LUT and texture quantization")
         else -> Policy()
     }
 
@@ -337,8 +339,8 @@ object RenderDiagnostics {
         }
         for (transparent in listOf(false, true)) for (sharpen in listOf(0, 20, 100)) {
             for (variant in 1..3) {
-                val effect = requireNotNull(FilterRegistry.withControls("g7x_$variant", 100, sharpen))
-                verify("g7x_$variant alpha=$transparent sharpen=$sharpen", effect,
+                val effect = requireNotNull(FilterRegistry.withControls("lucent_$variant", 100, sharpen))
+                verify("lucent_$variant alpha=$transparent sharpen=$sharpen", effect,
                     syntheticSource(WIDTH, HEIGHT, transparent), WIDTH, HEIGHT)
             }
         }
@@ -352,17 +354,17 @@ object RenderDiagnostics {
             } finally {
                 scaled.recycle()
             }
-            val effect = requireNotNull(FilterRegistry.withControls("g7x_1", 100, 100))
+            val effect = requireNotNull(FilterRegistry.withControls("lucent_1", 100, 100))
             val result = compare(context, effect, original, canonical, WIDTH, HEIGHT,
-                "g7x point sharpen resized source grid", Policy(alphaLimit = 2))
+                "lucent point sharpen resized source grid", Policy(alphaLimit = 2))
             checked++
             if (result?.passes != true) failed++
         } finally {
             original.recycle()
         }
         // Point-sharpen input also belongs to internal grade/focus programs when those controls
-        // are supplied; protect the complete pass graph, not just the default G7X single pass.
-        for (id in listOf("insomnia_1", "chicago_2")) {
+        // are supplied; protect the complete pass graph, not just the default Lucent single pass.
+        for (id in listOf("driftglass_1", "graphite_2")) {
             val effect = requireNotNull(FilterRegistry.withControls(id, 100, 100))
             verify("$id transparent sharpen=100", effect,
                 syntheticSource(WIDTH, HEIGHT, true), WIDTH, HEIGHT)
@@ -388,7 +390,7 @@ object RenderDiagnostics {
                 Policy(alphaLimit = if (transparent) 2 else 1))
         }
         val composed = requireNotNull(EditComposition.compose(
-            EditStage(requireNotNull(FilterRegistry.byId("dim_1")), 100),
+            EditStage(requireNotNull(FilterRegistry.byId("nightfall_1")), 100),
             EditStage(optical, 100), null))
         verify("filter_then_optical transparent", composed, syntheticSource(w, h, true), w, h,
             Policy(alphaLimit = 2))
@@ -422,8 +424,8 @@ object RenderDiagnostics {
 
     private fun logTimings(context: Context) {
         val ids = listOf(
-            "insomnia_1", "chicago_2", "g7x_1",
-            "dusty_1", "halation_1", "yesterday_1", "sensual_1", "kuji_1", "focal_1",
+            "driftglass_1", "graphite_2", "lucent_1",
+            "motes_1", "lumen_1", "daymark_1", "velour_1", "paperlight_1", "prism_1",
         )
         val effects = ids.mapNotNull { id ->
             FilterRegistry.byId(id) ?: EffectRegistry.byId(id)

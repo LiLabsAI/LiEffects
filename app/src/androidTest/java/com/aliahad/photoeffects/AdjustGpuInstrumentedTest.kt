@@ -95,6 +95,59 @@ class AdjustGpuInstrumentedTest {
             opaqueSource = true)
     }
 
+    @Test fun whitesAndColorDenoiseMatchAcrossEndpointsAndTransparency() {
+        for ((w, h) in listOf(193 to 127, 127 to 193, 1 to 1, 1 to 17, 17 to 1)) {
+            width = w
+            height = h
+            for (transparent in listOf(false, true)) {
+                val input = noisySource(transparent)
+                for (value in listOf(-100, 0, 50, 100)) {
+                    assertMatches(AdjustParams().with(AdjustControl.Whites, value), input = input)
+                }
+                for (value in listOf(0, 35, 100)) {
+                    assertMatches(AdjustParams().with(AdjustControl.ChromaDenoise, value), input = input)
+                }
+            }
+        }
+    }
+
+    @Test fun denoiseMatchesAtExportScaleWithWiderPixelSupport() {
+        width = 1620
+        height = 1620
+        assertMatches(AdjustParams().with(AdjustControl.ChromaDenoise, 100),
+            input = noisySource(false), opaqueSource = true)
+    }
+
+    @Test fun newControlsComposeWithExistingSpatialAndColorPasses() {
+        width = 193
+        height = 127
+        val base = AdjustParams().with(AdjustControl.Whites, -65)
+            .with(AdjustControl.ChromaDenoise, 80)
+            .with(AdjustControl.Exposure, 20)
+            .with(AdjustControl.HslOrangeSaturation, -20)
+        for (transparent in listOf(false, true)) {
+            val input = noisySource(transparent)
+            assertMatches(base.with(AdjustControl.Cleanup, 40).with(AdjustControl.Sharpen, 50), input = input)
+            assertMatches(base.with(AdjustControl.GaussianBlur, 20)
+                .with(AdjustControl.Fisheye, 35), input = input, alphaLimit = 2)
+        }
+    }
+
+    private fun noisySource(transparent: Boolean): IntArray = IntArray(width * height) { i ->
+        val x = i % width
+        val y = i / width
+        val luma = 0.25f + 0.40f * x / (width - 1).coerceAtLeast(1)
+        val redNoise = ((x * 13 + y * 17) % 7 - 3) * 0.025f
+        val blueNoise = ((x * 7 + y * 11) % 5 - 2) * 0.025f
+        val alpha = if (transparent) intArrayOf(0, 64, 128, 192, 255)[i % 5] else 255
+        com.aliahad.photoeffects.effect.cpu.PixelMath.pack(
+            luma + redNoise,
+            luma - (0.2126f * redNoise + 0.0722f * blueNoise) / 0.7152f,
+            luma + blueNoise,
+            alpha,
+        )
+    }
+
     private fun assertMatches(
         params: AdjustParams,
         maxLimit: Int = 4,

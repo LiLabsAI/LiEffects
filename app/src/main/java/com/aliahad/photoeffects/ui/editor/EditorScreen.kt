@@ -35,21 +35,24 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aliahad.photoeffects.ui.theme.EditorColors
 
 /**
- * PREQUEL-style dark editor screen:
+ * photo-editor dark editor screen:
  * top bar (close / undo / save) -> photo preview -> Effects panel -> bottom tool tabs.
  */
 @Composable
+@OptIn(ExperimentalComposeUiApi::class)
 fun EditorScreen(
     state: EditorState,
     onPickPhoto: () -> Unit,
@@ -59,7 +62,8 @@ fun EditorScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(EditorColors.Background),
+            .background(EditorColors.Background)
+            .semantics { testTagsAsResourceId = true },
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             EditorTopBar(
@@ -95,6 +99,11 @@ fun EditorScreen(
                         onHoldChange = { state.holdOriginal(it) },
                         modifier = Modifier.fillMaxSize(),
                         strengthLabel = state.strengthLabel,
+                        canvas = state.canvasParams,
+                        canvasEditing = state.activeTool == EditorTool.Canvas,
+                        onCanvasBegin = state::beginCanvasGesture,
+                        onCanvasEnd = state::finishCanvasGesture,
+                        onCanvasTransform = state::transformCanvas,
                     )
                     if (state.isLoadingPhoto) {
                         CircularProgressIndicator(
@@ -106,17 +115,17 @@ fun EditorScreen(
                 }
             }
 
-            if (state.activeTool == EditorTool.Adjust) {
-                AdjustPanel(state = state)
-            } else {
-                EffectsPanel(state = state)
+            when (state.activeTool) {
+                EditorTool.Adjust -> AdjustPanel(state = state)
+                EditorTool.Canvas -> CanvasPanel(state = state)
+                else -> EffectsPanel(state = state)
             }
 
             EditorToolBar(
                 activeTool = state.activeTool,
                 hasEffect = state.activePreset != null,
                 onSelectTool = { tool ->
-                    if (tool == EditorTool.Effects || tool == EditorTool.Filters || tool == EditorTool.Adjust) {
+                    if (tool == EditorTool.Effects || tool == EditorTool.Filters || tool == EditorTool.Adjust || tool == EditorTool.Canvas) {
                         state.selectTool(tool)
                     } else {
                         state.showMessage("${tool.label} is coming soon")
@@ -125,6 +134,8 @@ fun EditorScreen(
                 onBack = {
                     if (state.panelStage != PanelStage.Categories) {
                         state.panelBack()
+                    } else if (state.activeTool == EditorTool.Canvas) {
+                        state.selectTool(EditorTool.Effects)
                     } else {
                         val selected = state.activePreset
                         if (selected != null) {

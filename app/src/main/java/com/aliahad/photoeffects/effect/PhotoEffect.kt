@@ -17,7 +17,7 @@ fun interface CpuEffect {
  *
  * The AGSL source declares `uniform shader content;` plus the float uniforms listed in
  * [uniforms]; the intensity/seed/resolution uniforms are pushed by the renderer on every draw
- * (uniform names are family-specific: `DustyUniforms` / `HalationUniforms`).
+ * (uniform names are family-specific: `MotesUniforms` / `LumenUniforms`).
  */
 data class GpuProgram(
     val agslSource: String,
@@ -26,14 +26,14 @@ data class GpuProgram(
     val vectorUniforms: Map<String, FloatArray> = emptyMap(),
     /**
      * Extra asset-backed shader inputs: uniform shader name -> app asset path.
-     * Used by SENSUAL for the bundled PREQUEL `adj-Blur` mask (`uMask` -> `blurmask.jpg`),
-     * KUJI for the paper frames (`uFrame` -> `kuji_frame_N.png`) and FOCAL for the LUT atlas
-     * (`uLut` -> `focal_luts.png`); the preview binds each asset as a BitmapShader input.
+     * Used by VELOUR for the bundled radial blur mask (`uMask` -> `blurmask.jpg`),
+     * PAPERLIGHT for the paper frames (`uFrame` -> `paperlight_frame_N.png`) and PRISM for the LUT atlas
+     * (`uLut` -> `prism_luts.png`); the preview binds each asset as a BitmapShader input.
      */
     val extraShaderAssets: Map<String, String> = emptyMap(),
     /**
      * Extra shader inputs sampled in *bitmap pixel* space (identity local matrix) instead of
-     * normalized image space. FOCAL's LUT atlas is addressed by texel coordinates, unlike the
+     * normalized image space. PRISM's LUT atlas is addressed by texel coordinates, unlike the
      * image-sized mask/frame overlays.
      */
     val pixelSpaceShaders: Set<String> = emptySet(),
@@ -83,7 +83,7 @@ data class PhotoEffect(
     /** One-line parameter summary shown next to the effect name (e.g. "white dust · grain"). */
     val summary: String,
     /**
-     * Dot-matrix stamp overlay metadata, when the family draws one (YESTERDAY's "Date" tool).
+     * Dot-matrix stamp overlay metadata, when the family draws one (DAYMARK's "Date" tool).
      * The CPU renderer rasterizes it into its output; the GPU preview draws it as a canvas
      * overlay on top of the AGSL result (see `PhotoPreviewCard`).
      */
@@ -106,23 +106,23 @@ data class PhotoEffect(
     }
 }
 
-/** Builds one DUSTY preset (shared AGSL shader + deterministic CPU mirror) from a parameter row. */
-object DustyEffectFactory {
+/** Builds one MOTES preset (shared AGSL shader + deterministic CPU mirror) from a parameter row. */
+object MotesEffectFactory {
     fun create(
-        params: DustyParams,
+        params: MotesParams,
         extraCategories: Set<EffectCategory> = emptySet(),
     ): PhotoEffect = PhotoEffect(
         spec = EffectSpec(
             id = params.id,
             displayName = params.displayName,
-            familyId = DustyFamily.ID,
+            familyId = MotesFamily.ID,
             description = params.description,
             defaultIntensity = params.defaultIntensity,
             extraCategories = extraCategories,
         ),
-        cpu = com.aliahad.photoeffects.effect.cpu.CpuDustyRenderer(params),
+        cpu = com.aliahad.photoeffects.effect.cpu.CpuMotesRenderer(params),
         gpu = GpuProgram(
-            agslSource = DUSTY_AGSL,
+            agslSource = MOTES_AGSL,
             uniforms = params.toUniforms(),
         ),
         summary = params.summary(),
@@ -130,23 +130,23 @@ object DustyEffectFactory {
     )
 }
 
-/** Builds one HALATION preset (shared AGSL shader + deterministic CPU mirror) from a parameter row. */
-object HalationEffectFactory {
+/** Builds one LUMEN preset (shared AGSL shader + deterministic CPU mirror) from a parameter row. */
+object LumenEffectFactory {
     fun create(
-        params: HalationParams,
+        params: LumenParams,
         extraCategories: Set<EffectCategory> = emptySet(),
     ): PhotoEffect = PhotoEffect(
         spec = EffectSpec(
             id = params.id,
             displayName = params.displayName,
-            familyId = HalationFamily.ID,
+            familyId = LumenFamily.ID,
             description = params.description,
             defaultIntensity = params.defaultIntensity,
             extraCategories = extraCategories,
         ),
-        cpu = com.aliahad.photoeffects.effect.cpu.CpuHalationRenderer(params),
+        cpu = com.aliahad.photoeffects.effect.cpu.CpuLumenRenderer(params),
         gpu = GpuProgram(
-            agslSource = HALATION_AGSL,
+            agslSource = LUMEN_AGSL,
             uniforms = params.toUniforms(),
         ),
         summary = params.summary(),
@@ -154,23 +154,23 @@ object HalationEffectFactory {
     )
 }
 
-/** Builds one YESTERDAY preset (shared AGSL shader + CPU mirror + dot-matrix date stamp). */
-object YesterdayEffectFactory {
+/** Builds one DAYMARK preset (shared AGSL shader + CPU mirror + dot-matrix date stamp). */
+object DaymarkEffectFactory {
     fun create(
-        params: YesterdayParams,
+        params: DaymarkParams,
         extraCategories: Set<EffectCategory> = emptySet(),
     ): PhotoEffect = PhotoEffect(
         spec = EffectSpec(
             id = params.id,
             displayName = params.displayName,
-            familyId = YesterdayFamily.ID,
+            familyId = DaymarkFamily.ID,
             description = params.description,
             defaultIntensity = params.defaultIntensity,
             extraCategories = extraCategories,
         ),
-        cpu = com.aliahad.photoeffects.effect.cpu.CpuYesterdayRenderer(params),
+        cpu = com.aliahad.photoeffects.effect.cpu.CpuDaymarkRenderer(params),
         gpu = GpuProgram(
-            agslSource = YESTERDAY_AGSL,
+            agslSource = DAYMARK_AGSL,
             uniforms = params.toUniforms(),
         ),
         summary = params.summary(),
@@ -179,25 +179,25 @@ object YesterdayEffectFactory {
     )
 }
 
-/** Builds one SENSUAL preset (shared AGSL shader + deterministic CPU mirror) from a parameter row. */
-object SensualEffectFactory {
+/** Builds one VELOUR preset (shared AGSL shader + deterministic CPU mirror) from a parameter row. */
+object VelourEffectFactory {
     fun create(
-        params: SensualParams,
+        params: VelourParams,
         extraCategories: Set<EffectCategory> = emptySet(),
     ): PhotoEffect = PhotoEffect(
         spec = EffectSpec(
             id = params.id,
             displayName = params.displayName,
-            familyId = SensualFamily.ID,
+            familyId = VelourFamily.ID,
             description = params.description,
             defaultIntensity = params.defaultIntensity,
             extraCategories = extraCategories,
         ),
-        cpu = com.aliahad.photoeffects.effect.cpu.CpuSensualRenderer(params),
+        cpu = com.aliahad.photoeffects.effect.cpu.CpuVelourRenderer(params),
         gpu = GpuProgram(
-            agslSource = SENSUAL_AGSL,
+            agslSource = VELOUR_AGSL,
             uniforms = params.toUniforms(),
-            // PREQUEL's adj-Blur mask: sharp centre / blurred edges, bundled in assets.
+            // Radial blur mask: sharp centre / blurred edges, bundled in assets.
             extraShaderAssets = mapOf("uMask" to "blurmask.jpg"),
         ),
         summary = params.summary(),
@@ -205,55 +205,117 @@ object SensualEffectFactory {
     )
 }
 
-/** Builds one KUJI preset (shared AGSL shader + deterministic CPU mirror + paper frame). */
-object KujiEffectFactory {
+/** Builds one PAPERLIGHT preset (shared AGSL shader + deterministic CPU mirror + paper frame). */
+object PaperlightEffectFactory {
     fun create(
-        params: KujiParams,
+        params: PaperlightParams,
         extraCategories: Set<EffectCategory> = emptySet(),
     ): PhotoEffect = PhotoEffect(
         spec = EffectSpec(
             id = params.id,
             displayName = params.displayName,
-            familyId = KujiFamily.ID,
+            familyId = PaperlightFamily.ID,
             description = params.description,
             defaultIntensity = params.defaultIntensity,
             extraCategories = extraCategories,
         ),
-        cpu = com.aliahad.photoeffects.effect.cpu.CpuKujiRenderer(params),
+        cpu = com.aliahad.photoeffects.effect.cpu.CpuPaperlightRenderer(params),
         gpu = GpuProgram(
-            agslSource = KUJI_AGSL,
+            agslSource = PAPERLIGHT_AGSL,
             uniforms = params.toUniforms(),
-            // Recovered PREQUEL frame overlay, bound as `uniform shader uFrame`.
-            extraShaderAssets = mapOf(KujiUniforms.FRAME_SHADER to params.frameAsset),
+            // Bundled reference-derived frame overlay, bound as `uniform shader uFrame`.
+            extraShaderAssets = mapOf(PaperlightUniforms.FRAME_SHADER to params.frameAsset),
         ),
         summary = params.summary(),
         exportBytesPerPixel = 12,
     )
 }
 
-/** Builds one FOCAL preset (shared AGSL shader + deterministic CPU mirror + 33^3 LUT atlas). */
-object FocalEffectFactory {
+/** Builds one PRISM preset (shared AGSL shader + deterministic CPU mirror + 33^3 LUT atlas). */
+object PrismEffectFactory {
     fun create(
-        params: FocalParams,
+        params: PrismParams,
         extraCategories: Set<EffectCategory> = emptySet(),
     ): PhotoEffect = PhotoEffect(
         spec = EffectSpec(
             id = params.id,
             displayName = params.displayName,
-            familyId = FocalFamily.ID,
+            familyId = PrismFamily.ID,
             description = params.description,
             defaultIntensity = params.defaultIntensity,
             extraCategories = extraCategories,
         ),
-        cpu = com.aliahad.photoeffects.effect.cpu.CpuFocalRenderer(params),
+        cpu = com.aliahad.photoeffects.effect.cpu.CpuPrismRenderer(params),
         gpu = GpuProgram(
-            agslSource = FOCAL_AGSL,
+            agslSource = PRISM_AGSL,
             uniforms = params.toUniforms(),
             // Six recovered 33^3 LUTs packed in one atlas, bound as `uniform shader uLut`.
-            extraShaderAssets = mapOf(FocalUniforms.LUT_SHADER to "focal_luts.png"),
-            pixelSpaceShaders = setOf(FocalUniforms.LUT_SHADER),
+            extraShaderAssets = mapOf(PrismUniforms.LUT_SHADER to "prism_luts.png"),
+            pixelSpaceShaders = setOf(PrismUniforms.LUT_SHADER),
         ),
         summary = params.summary(),
         exportBytesPerPixel = 12,
+    )
+}
+
+object NocturneEffectFactory {
+    fun create(params: NocturneParams): PhotoEffect = PhotoEffect(
+        spec = EffectSpec(
+            id = params.id,
+            displayName = params.displayName,
+            familyId = NocturneFamily.ID,
+            description = params.description,
+            defaultIntensity = params.defaultIntensity,
+            extraCategories = setOf(EffectCategory.New, EffectCategory.ForYou),
+        ),
+        cpu = com.aliahad.photoeffects.effect.cpu.CpuNocturneRenderer(params),
+        gpu = GpuProgram(NOCTURNE_AGSL, params.toUniforms()),
+        summary = params.summary,
+        exportBytesPerPixel = 16,
+    )
+}
+
+object MarqueeEffectFactory {
+    fun create(params: MarqueeParams): PhotoEffect = PhotoEffect(
+        spec = EffectSpec(
+            id = params.id,
+            displayName = params.displayName,
+            familyId = MarqueeFamily.ID,
+            description = params.description,
+            defaultIntensity = params.defaultIntensity,
+            extraCategories = setOf(EffectCategory.New, EffectCategory.ForYou, EffectCategory.Films),
+        ),
+        cpu = com.aliahad.photoeffects.effect.cpu.CpuMarqueeRenderer(params),
+        gpu = GpuProgram(MARQUEE_AGSL, params.toUniforms()),
+        summary = params.summary,
+        exportBytesPerPixel = 16,
+    )
+}
+
+object SolsticeEffectFactory {
+    fun create(params: SolsticeParams): PhotoEffect = PhotoEffect(
+        spec = EffectSpec(
+            id = params.id, displayName = params.displayName, familyId = SolsticeFamily.ID,
+            description = params.description, defaultIntensity = params.defaultIntensity,
+            extraCategories = setOf(EffectCategory.New, EffectCategory.ForYou, EffectCategory.Films),
+        ),
+        cpu = com.aliahad.photoeffects.effect.cpu.CpuSolsticeRenderer(params),
+        gpu = GpuProgram(SOLSTICE_AGSL, params.toUniforms()),
+        summary = params.summary,
+        exportBytesPerPixel = 16,
+    )
+}
+
+object ScreenprintEffectFactory {
+    fun create(params: ScreenprintParams): PhotoEffect = PhotoEffect(
+        spec = EffectSpec(
+            id = params.id, displayName = params.displayName, familyId = ScreenprintFamily.ID,
+            description = params.description, defaultIntensity = params.defaultIntensity,
+            extraCategories = setOf(EffectCategory.New, EffectCategory.ForYou),
+        ),
+        cpu = com.aliahad.photoeffects.effect.cpu.CpuScreenprintRenderer(params),
+        gpu = GpuProgram(SCREENPRINT_AGSL, params.toUniforms()),
+        summary = params.summary,
+        exportBytesPerPixel = 16,
     )
 }

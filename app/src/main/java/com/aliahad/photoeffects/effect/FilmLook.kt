@@ -1,7 +1,7 @@
 package com.aliahad.photoeffects.effect
 
 /**
- * Shared colour-science primitives for the "pack" film families (YESTERDAY / SENSUAL).
+ * Shared colour-science primitives for the "pack" film families (DAYMARK / VELOUR).
  *
  * Both rewritten families use the same fitted model shape:
  *   1. per-channel cubic tone curve `out = ((a3*x + a2)*x + a1)*x + a0`

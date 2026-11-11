@@ -33,29 +33,29 @@ class EffectExportInstrumentedTest {
     private val context: Context get() = InstrumentationRegistry.getInstrumentation().targetContext
 
     @Test
-    fun focal_export_keeps_full_12mp_resolution() {
+    fun prism_export_keeps_full_12mp_resolution() {
         val photo = loadTestPhoto() ?: return
-        val effect = requireNotNull(EffectRegistry.byId("focal_2"))
+        val effect = requireNotNull(EffectRegistry.byId("prism_2"))
         val result = runBlocking { PhotoSaver.save(context, photo, effect, 100) }
         assertTrue("save failed: ${result.error}", result.success)
         val exported = queryExported(result.displayPath!!.substringAfterLast('/'))!!
-        Log.i(TAG, "focal_2 export ${exported.width}x${exported.height} ${exported.size} B")
+        Log.i(TAG, "prism_2 export ${exported.width}x${exported.height} ${exported.size} B")
         assertEquals(4000, exported.width)
         assertEquals(3000, exported.height)
-        assertTrue("focal_2 export is only ${exported.size} B", exported.size > 1_500_000)
+        assertTrue("prism_2 export is only ${exported.size} B", exported.size > 1_500_000)
     }
 
     @Test
     fun heaviest_effect_export_beats_the_old_1440_cap() {
         val photo = loadTestPhoto() ?: return
-        val effect = requireNotNull(EffectRegistry.byId("sensual_1"))
+        val effect = requireNotNull(EffectRegistry.byId("velour_1"))
         val budget = ExportBudget.maxPixels(effect)
         val result = runBlocking { PhotoSaver.save(context, photo, effect, 100) }
         assertTrue("save failed: ${result.error}", result.success)
         val exported = queryExported(result.displayPath!!.substringAfterLast('/'))!!
-        Log.i(TAG, "sensual_1 budget=$budget export ${exported.width}x${exported.height} ${exported.size} B")
-        assertTrue("sensual_1 export is only ${exported.width}px wide", exported.width > 1440)
-        assertTrue("sensual_1 export is only ${exported.size} B", exported.size > 1_000_000)
+        Log.i(TAG, "velour_1 budget=$budget export ${exported.width}x${exported.height} ${exported.size} B")
+        assertTrue("velour_1 export is only ${exported.width}px wide", exported.width > 1440)
+        assertTrue("velour_1 export is only ${exported.size} B", exported.size > 1_000_000)
     }
 
     @Test

@@ -32,8 +32,8 @@ enum class HslBand(
 enum class HslComponent(val label: String) { Hue("Hue"), Saturation("Saturation"), Lightness("Lightness") }
 
 /**
- * The complete Adjust inventory (57 controls). Labels and ranges are inspired by PREQUEL's
- * Adjust panel; implementations are original analytic operations, not copied LUTs.
+ * The complete Adjust inventory (59 controls). Labels, ranges and neutral values are shared
+ * by the UI and rendering plan. Implementations use analytic operations rather than LUTs.
  */
 enum class AdjustControl(
     val category: AdjustCategory,
@@ -47,6 +47,7 @@ enum class AdjustControl(
     Brightness(AdjustCategory.Light, "Brightness", -100..100, 0, AdjustPass.Color),
     Contrast(AdjustCategory.Light, "Contrast", -100..100, 0, AdjustPass.Color),
     Highlights(AdjustCategory.Light, "Highlights", -100..100, 0, AdjustPass.Color),
+    Whites(AdjustCategory.Light, "Whites", -100..100, 0, AdjustPass.Color),
     Shadows(AdjustCategory.Light, "Shadows", -100..100, 0, AdjustPass.Color),
     BlackPoint(AdjustCategory.Light, "Black point", -100..100, 0, AdjustPass.Color),
     Fade(AdjustCategory.Light, "Fade", 0..100, 0, AdjustPass.Color),
@@ -89,6 +90,7 @@ enum class AdjustControl(
     Clarity(AdjustCategory.Details, "Clarity", 0..100, 0, AdjustPass.Detail),
     Dehaze(AdjustCategory.Details, "Dehaze", -100..100, 0, AdjustPass.Detail),
     MidtoneDetails(AdjustCategory.Details, "Midtone details", -100..100, 0, AdjustPass.Detail),
+    ChromaDenoise(AdjustCategory.Details, "Color denoise", 0..100, 0, AdjustPass.Detail),
 
     // Stylize
     Grain(AdjustCategory.Stylize, "Grain", 0..100, 0, AdjustPass.Finish),

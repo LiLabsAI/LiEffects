@@ -25,7 +25,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** End-to-end checks for the PREQUEL-style resolution / quality / metadata export options. */
+/** End-to-end checks for the photo-editor resolution / quality / metadata export options. */
 @RunWith(AndroidJUnit4::class)
 class ExportOptionsInstrumentedTest {
 

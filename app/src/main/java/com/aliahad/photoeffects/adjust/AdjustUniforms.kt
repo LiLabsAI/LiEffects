@@ -10,6 +10,7 @@ object AdjustUniforms {
     const val BRIGHTNESS = "uBrightness"
     const val CONTRAST = "uContrast"
     const val HIGHLIGHTS = "uHighlights"
+    const val WHITES = "uWhites"
     const val SHADOWS = "uShadows"
     const val BLACK_POINT = "uBlackPoint"
     const val FADE = "uFade"
@@ -30,6 +31,7 @@ object AdjustUniforms {
     const val CLARITY = "uClarity"
     const val DEHAZE = "uDehaze"
     const val MIDTONE_DETAILS = "uMidtoneDetails"
+    const val CHROMA_DENOISE = "uChromaDenoise"
 
     const val GRAIN = "uGrain"
     const val GRAIN_SIZE = "uGrainSize"

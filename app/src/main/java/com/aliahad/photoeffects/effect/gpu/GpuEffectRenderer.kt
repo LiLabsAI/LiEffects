@@ -3,7 +3,7 @@ package com.aliahad.photoeffects.effect.gpu
 import android.graphics.RenderEffect
 import android.graphics.RuntimeShader
 import android.util.Log
-import com.aliahad.photoeffects.effect.DustyUniforms
+import com.aliahad.photoeffects.effect.MotesUniforms
 import com.aliahad.photoeffects.effect.EffectSeed
 import com.aliahad.photoeffects.effect.GpuProgram
 import java.util.concurrent.ConcurrentHashMap
@@ -76,21 +76,21 @@ object GpuEffectRenderer {
         heightPx: Float,
     ) {
         shader.setFloatUniform(
-            DustyUniforms.INTENSITY,
+            MotesUniforms.INTENSITY,
             ((intensityOverride ?: 1f) * intensity).coerceIn(0f, 1f),
         )
-        val variantSeed = (uniforms[DustyUniforms.SEED] ?: 0f).toInt()
+        val variantSeed = (uniforms[MotesUniforms.SEED] ?: 0f).toInt()
         shader.setFloatUniform(
-            DustyUniforms.SEED,
+            MotesUniforms.SEED,
             EffectSeed.of(photoSeed, variantSeed).toFloat(),
         )
         shader.setFloatUniform(
-            DustyUniforms.RESOLUTION,
+            MotesUniforms.RESOLUTION,
             widthPx.coerceAtLeast(1f),
             heightPx.coerceAtLeast(1f),
         )
         for ((name, value) in uniforms) {
-            if (name != DustyUniforms.SEED) shader.setFloatUniform(name, value)
+            if (name != MotesUniforms.SEED) shader.setFloatUniform(name, value)
         }
         for ((name, values) in vectorUniforms) {
             // float2/3/4 uniforms use the vector overloads; float[] uniforms use the array form.

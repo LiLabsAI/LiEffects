@@ -6,6 +6,8 @@ import android.graphics.Bitmap
 import android.os.Environment
 import android.provider.MediaStore
 import com.aliahad.photoeffects.effect.PhotoEffect
+import com.aliahad.photoeffects.canvas.CanvasParams
+import com.aliahad.photoeffects.canvas.CanvasBitmapRenderer
 import com.aliahad.photoeffects.effect.render.EffectBitmapRenderer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -43,19 +45,21 @@ object PhotoSaver {
         effect: PhotoEffect?,
         intensityPercent: Int,
         options: ExportOptions = ExportOptions(),
+        canvas: CanvasParams = CanvasParams(),
     ): Result = withContext(Dispatchers.Default) {
-        val plan = ExportPlanner.plan(photo.sourceWidth, photo.sourceHeight, options, effect)
+        val plan = ExportPlanner.plan(photo.sourceWidth, photo.sourceHeight, options, effect, canvas = canvas)
+        val geometry = canvas.geometry(photo.sourceWidth, photo.sourceHeight)
         val job = currentCoroutineContext()[Job]
-        var source: Bitmap? = null
         var rendered: Bitmap? = null
         try {
-            rendered = ExportRetry.render(plan.width, plan.height) { width, height ->
+            rendered = ExportRetry.render(plan.renderWidth, plan.renderHeight) { width, height ->
                 currentCoroutineContext().ensureActive()
                 val decoded = PhotoLoader.decodeForExport(context, photo, width, height)
-                source = decoded
+                var look: Bitmap? = null
+                var output: Bitmap? = null
                 try {
                     currentCoroutineContext().ensureActive()
-                    if (effect != null) {
+                    look = if (effect != null) {
                         EffectBitmapRenderer.renderFull(
                             decoded, effect, intensityPercent, photo.seed,
                             cancel = { job?.isActive == false },
@@ -63,10 +67,13 @@ object PhotoSaver {
                     } else {
                         decoded
                     }
-                } catch (t: Throwable) {
-                    decoded.recycle()
-                    source = null
-                    throw t
+                    output = if (canvas.isIdentity) look else CanvasBitmapRenderer.render(
+                        look, geometry, cancel = { job?.isActive == false },
+                    )
+                    output
+                } finally {
+                    if (decoded !== output) decoded.recycle()
+                    if (look !== decoded && look !== output) look?.recycle()
                 }
             }
             val bitmap = rendered
@@ -82,7 +89,6 @@ object PhotoSaver {
             Result(false, null, failure.message ?: "Export failed")
         } finally {
             rendered?.recycle()
-            if (source !== rendered) source?.recycle()
         }
     }
 

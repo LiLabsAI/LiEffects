@@ -24,7 +24,7 @@ class LegacyAlphaRegressionTest {
     }
 
     @Test fun everyLegacyPresetIgnoresInvisibleRgbWithoutChangingAlphaOrInput() {
-        // Large enough to activate Yesterday's preblur and the parallel CPU branch.
+        // Large enough to activate Daymark's preblur and the parallel CPU branch.
         val width = 129
         val height = 193
         val first = IntArray(width * height) { i ->

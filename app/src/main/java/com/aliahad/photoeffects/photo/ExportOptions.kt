@@ -1,15 +1,17 @@
 package com.aliahad.photoeffects.photo
 
 import com.aliahad.photoeffects.effect.PhotoEffect
+import com.aliahad.photoeffects.canvas.CanvasParams
 import kotlin.math.max
+import kotlin.math.ceil
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
 /**
- * PREQUEL 2.5.0 photo export settings, recovered from `km7` / `hm7` / `bm7` / `nfd` / `il7`.
+ * Source-limited resolution tiers, JPEG quality and metadata settings.
  *
- * A tier is only offered when the source is at least that large (PREQUEL never upscales); the
+ * A tier is only offered when the source is at least that large (export never upscales); the
  * highest offered tier exports at the source size and lower tiers use their nominal long edge
  * scaled to the source aspect, rounded to even pixels.
  */
@@ -19,7 +21,7 @@ enum class ExportResolution(val longSide: Int, val shortSide: Int, val label: St
     FOUR_K(3840, 2160, "4K"),
 }
 
-/** The exact JPEG qualities PREQUEL passes to its encoder, plus its size-estimate coefficients. */
+/** JPEG encoding qualities and the size-estimate coefficients used by the export sheet. */
 enum class ExportQuality(
     val jpegQuality: Int,
     val label: String,
@@ -38,7 +40,7 @@ enum class ExportMetadataMode(val label: String, val hint: String) {
 
 /**
  * [resolution] defaults to [ExportResolution.FOUR_K], which [ExportPlanner] resolves to the
- * largest tier the photo can fill (i.e. the source size) — PREQUEL's default export.
+ * largest tier the photo can fill (i.e. the source size).
  */
 data class ExportOptions(
     val resolution: ExportResolution = ExportResolution.FOUR_K,
@@ -51,6 +53,8 @@ data class ResolutionOption(
     val width: Int,
     val height: Int,
     val enabled: Boolean,
+    val renderWidth: Int = width,
+    val renderHeight: Int = height,
 )
 
 data class ExportPlan(
@@ -60,13 +64,15 @@ data class ExportPlan(
     val quality: ExportQuality,
     val metadata: ExportMetadataMode,
     val estimatedBytes: Long,
+    val renderWidth: Int = width,
+    val renderHeight: Int = height,
 )
 
 object ExportPlanner {
 
     private const val MB = 1_048_576L
 
-    /** PREQUEL lists the tiers from smallest to largest: HD, Full HD, 4K. */
+    /** List the tiers from smallest to largest: HD, Full HD, 4K. */
     val resolutions: List<ExportResolution> = ExportResolution.entries
 
     /**
@@ -82,10 +88,14 @@ object ExportPlanner {
         sourceHeight: Int,
         effect: PhotoEffect?,
         maxMemoryBytes: Long = Runtime.getRuntime().maxMemory(),
+        canvas: CanvasParams = CanvasParams(),
     ): List<ResolutionOption> {
-        val sourceLong = max(sourceWidth, sourceHeight)
-        val sourceShort = min(sourceWidth, sourceHeight)
-        val maxPixels = ExportBudget.maxPixels(effect, maxMemoryBytes)
+        val geometry = canvas.geometry(sourceWidth, sourceHeight)
+        val (cropWidth, cropHeight) = geometry.outputSize()
+        val sourceLong = max(cropWidth, cropHeight)
+        val sourceShort = min(cropWidth, cropHeight)
+        // Geometry is last: budget the entire rendered source, plus its cropped destination.
+        val maxPixels = ExportBudget.maxPixels(effect, maxMemoryBytes, if (canvas.isIdentity) 0 else 12)
         val topAvailable = resolutions.lastOrNull { isAvailable(it, sourceLong, sourceShort) }
         return resolutions.map { resolution ->
             val offered = topAvailable?.let { isAvailable(resolution, sourceLong, sourceShort) }
@@ -94,12 +104,25 @@ object ExportPlanner {
                 ResolutionOption(resolution, 0, 0, enabled = false)
             } else {
                 val (width, height) = if (topAvailable == null || resolution == topAvailable) {
-                    sourceWidth to sourceHeight
+                    cropWidth to cropHeight
                 } else {
-                    nominalSize(resolution, sourceWidth, sourceHeight)
+                    nominalSize(resolution, cropWidth, cropHeight)
                 }
-                val (cappedWidth, cappedHeight) = ExportBudget.targetSize(width, height, maxPixels)
-                ResolutionOption(resolution, cappedWidth, cappedHeight, enabled = true)
+                if (canvas.isIdentity) {
+                    val (cappedWidth, cappedHeight) = ExportBudget.targetSize(width, height, maxPixels)
+                    ResolutionOption(resolution, cappedWidth, cappedHeight, enabled = true)
+                } else {
+                    val scale = if (topAvailable == null || resolution == topAvailable) 1.0 else
+                        min(width / geometry.cropWidth, height / geometry.cropHeight).coerceAtMost(1.0)
+                    val (renderWidth, renderHeight) = ExportBudget.targetSize(
+                        // Decode enough samples for the requested tier; flooring can make a
+                        // nominal 720×1280 Story export lose one column and two rows.
+                        ceil(sourceWidth * scale).toInt().coerceAtLeast(1),
+                        ceil(sourceHeight * scale).toInt().coerceAtLeast(1), maxPixels,
+                    )
+                    val (outputWidth, outputHeight) = geometry.outputSize(renderWidth, renderHeight)
+                    ResolutionOption(resolution, outputWidth, outputHeight, true, renderWidth, renderHeight)
+                }
             }
         }
     }
@@ -111,13 +134,14 @@ object ExportPlanner {
         requested: ExportResolution,
         effect: PhotoEffect? = null,
         maxMemoryBytes: Long = Runtime.getRuntime().maxMemory(),
+        canvas: CanvasParams = CanvasParams(),
     ): ExportResolution =
-        select(resolutionOptions(sourceWidth, sourceHeight, effect, maxMemoryBytes), requested)
+        select(resolutionOptions(sourceWidth, sourceHeight, effect, maxMemoryBytes, canvas), requested)
             .resolution
 
     /**
      * The export that will actually run. When the requested tier is unavailable (smaller
-     * source), PREQUEL falls back to Full HD and then to the largest offered tier.
+     * source), fall back to Full HD and then to the largest offered tier.
      */
     fun plan(
         sourceWidth: Int,
@@ -125,9 +149,10 @@ object ExportPlanner {
         options: ExportOptions,
         effect: PhotoEffect?,
         maxMemoryBytes: Long = Runtime.getRuntime().maxMemory(),
+        canvas: CanvasParams = CanvasParams(),
     ): ExportPlan {
         val chosen = select(
-            resolutionOptions(sourceWidth, sourceHeight, effect, maxMemoryBytes),
+            resolutionOptions(sourceWidth, sourceHeight, effect, maxMemoryBytes, canvas),
             options.resolution,
         )
         return ExportPlan(
@@ -137,14 +162,16 @@ object ExportPlanner {
             quality = options.quality,
             metadata = options.metadata,
             estimatedBytes = estimateBytes(chosen.width, chosen.height, options.quality),
+            renderWidth = chosen.renderWidth,
+            renderHeight = chosen.renderHeight,
         )
     }
 
-    /** PREQUEL's `il7` estimate: pixels × 0.35 / 0.18 / 0.09 bytes for High / Medium / Low. */
+    /** Approximate JPEG size: pixels × 0.35 / 0.18 / 0.09 bytes for High / Medium / Low. */
     fun estimateBytes(width: Int, height: Int, quality: ExportQuality): Long =
         (width.toLong() * height * quality.estimatedBytesPerPixel).roundToLong()
 
-    /** PREQUEL shows a whole number of MB, so 1440×1920 @ High (~0.92 MB) reads "~1 MB". */
+    /** Show whole megabytes, so 1440×1920 @ High (~0.92 MB) reads "~1 MB". */
     fun formatEstimate(bytes: Long): String {
         val megabytes = (bytes.toDouble() / MB).roundToInt().coerceAtLeast(1)
         return "~$megabytes MB"

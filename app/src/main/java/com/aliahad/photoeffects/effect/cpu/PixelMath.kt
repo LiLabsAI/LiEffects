@@ -7,7 +7,7 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * Pure-Kotlin mirror of the AGSL helpers in `DustyAgsl.kt` plus small colour utilities.
+ * Pure-Kotlin mirror of the AGSL helpers in `MotesAgsl.kt` plus small colour utilities.
  *
  * Noise uses an **integer lattice hash** (32-bit wrap-around arithmetic, identical constants in
  * AGSL `uint` and Kotlin `Int`) instead of `fract(large_float)` hashes: float hashes lose
@@ -83,7 +83,7 @@ internal object PixelMath {
             a + (2f * b - 1f) * (sqrt(a.coerceAtLeast(0f)) - a)
         }
 
-    /** PREQUEL film-grain soft-light kernel (D(x) polynomial for dark base values). */
+    /** Film-grain soft-light kernel (D(x) polynomial for dark base values). */
     fun softLightFilm(base: Float, b: Float): Float {
         val d = if (base <= 0.25f) ((16f * base - 12f) * base + 4f) * base else sqrt(base.coerceAtLeast(0f))
         return if (b <= 0.5f) {

@@ -7,6 +7,7 @@ data class AdjustLight(
     val brightness: Int = 0,
     val contrast: Int = 0,
     val highlights: Int = 0,
+    val whites: Int = 0,
     val shadows: Int = 0,
     val blackPoint: Int = 0,
     val fade: Int = 0,
@@ -76,6 +77,7 @@ data class AdjustDetails(
     val clarity: Int = 0,
     val dehaze: Int = 0,
     val midtoneDetails: Int = 0,
+    val chromaDenoise: Int = 0,
 )
 
 data class AdjustStylize(
@@ -120,7 +122,7 @@ data class AdjustLayers(
 }
 
 /**
- * One immutable Adjust value set. All 57 controls are grouped for readability; [value] and
+ * One immutable Adjust value set. All 59 controls are grouped for readability; [value] and
  * [with] are the only generic accessors used by the UI and renderers.
  */
 data class AdjustParams(
@@ -145,6 +147,7 @@ data class AdjustParams(
         AdjustControl.Brightness -> light.brightness
         AdjustControl.Contrast -> light.contrast
         AdjustControl.Highlights -> light.highlights
+        AdjustControl.Whites -> light.whites
         AdjustControl.Shadows -> light.shadows
         AdjustControl.BlackPoint -> light.blackPoint
         AdjustControl.Fade -> light.fade
@@ -163,6 +166,7 @@ data class AdjustParams(
         AdjustControl.Clarity -> details.clarity
         AdjustControl.Dehaze -> details.dehaze
         AdjustControl.MidtoneDetails -> details.midtoneDetails
+        AdjustControl.ChromaDenoise -> details.chromaDenoise
         AdjustControl.Grain -> stylize.grain
         AdjustControl.Dust -> stylize.dust
         AdjustControl.Vignette -> stylize.vignette
@@ -194,6 +198,7 @@ data class AdjustParams(
             AdjustControl.Brightness -> copy(light = light.copy(brightness = v))
             AdjustControl.Contrast -> copy(light = light.copy(contrast = v))
             AdjustControl.Highlights -> copy(light = light.copy(highlights = v))
+            AdjustControl.Whites -> copy(light = light.copy(whites = v))
             AdjustControl.Shadows -> copy(light = light.copy(shadows = v))
             AdjustControl.BlackPoint -> copy(light = light.copy(blackPoint = v))
             AdjustControl.Fade -> copy(light = light.copy(fade = v))
@@ -212,6 +217,7 @@ data class AdjustParams(
             AdjustControl.Clarity -> copy(details = details.copy(clarity = v))
             AdjustControl.Dehaze -> copy(details = details.copy(dehaze = v))
             AdjustControl.MidtoneDetails -> copy(details = details.copy(midtoneDetails = v))
+            AdjustControl.ChromaDenoise -> copy(details = details.copy(chromaDenoise = v))
             AdjustControl.Grain -> copy(stylize = stylize.copy(grain = v))
             AdjustControl.Dust -> copy(stylize = stylize.copy(dust = v))
             AdjustControl.Vignette -> copy(stylize = stylize.copy(vignette = v))
@@ -264,6 +270,7 @@ data class AdjustParams(
         "uBrightness" to light.brightness.norm(),
         "uContrast" to light.contrast.norm(),
         "uHighlights" to light.highlights.norm(),
+        "uWhites" to light.whites.norm(),
         "uShadows" to light.shadows.norm(),
         "uBlackPoint" to light.blackPoint.norm(),
         "uFade" to light.fade.norm(),
@@ -282,6 +289,7 @@ data class AdjustParams(
         "uClarity" to details.clarity.norm(),
         "uDehaze" to details.dehaze.norm(),
         "uMidtoneDetails" to details.midtoneDetails.norm(),
+        "uChromaDenoise" to details.chromaDenoise.norm(),
         "uGrain" to stylize.grain.norm(),
         "uGrainSize" to 1.7f,
         "uDust" to stylize.dust.norm(),

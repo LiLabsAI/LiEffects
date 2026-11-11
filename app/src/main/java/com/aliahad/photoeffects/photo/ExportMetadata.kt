@@ -11,7 +11,7 @@ import java.util.Locale
 /**
  * Writes the EXIF block of an exported JPEG.
  *
- * PREQUEL's "Override" mode ("As new media") writes only fresh capture metadata — no camera,
+ * "Override" mode ("As new media") writes only fresh capture metadata — no camera,
  * lens or location tags (verified on its exports). "Keep" ("Copy of original") carries the
  * original photo's capture tags over. Either way the pixels we write are already upright
  * (ImageDecoder applies the source orientation), so the orientation tag is reset to normal.

@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -36,6 +35,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,6 +50,7 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -61,6 +62,7 @@ import com.aliahad.photoeffects.effect.PhotoEffect
 import com.aliahad.photoeffects.effect.gpu.GpuRenderGraph
 import com.aliahad.photoeffects.effect.render.EffectBitmapRenderer
 import com.aliahad.photoeffects.photo.LoadedPhoto
+import com.aliahad.photoeffects.canvas.CanvasParams
 import com.aliahad.photoeffects.ui.theme.EditorColors
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
@@ -84,10 +86,14 @@ fun PhotoPreviewCard(
     onHoldChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     strengthLabel: String = "${intensity}%",
+    canvas: CanvasParams = CanvasParams(),
+    canvasEditing: Boolean = false,
+    onCanvasBegin: () -> Unit = {},
+    onCanvasEnd: () -> Unit = {},
+    onCanvasTransform: (Float, Float, Float, Float, Float) -> Unit = { _, _, _, _, _ -> },
 ) {
     val bitmap = photo.bitmap
     val backdrop = rememberBackdrop(bitmap)
-    val aspect = bitmap.width.toFloat() / bitmap.height.toFloat()
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -110,7 +116,8 @@ fun PhotoPreviewCard(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(photo.id) {
+                .pointerInput(photo.id, canvasEditing) {
+                    if (canvasEditing) return@pointerInput
                     detectTapGestures(onPress = {
                         onHoldChange(true)
                         try {
@@ -122,14 +129,9 @@ fun PhotoPreviewCard(
                 },
             contentAlignment = Alignment.Center,
         ) {
-            Box(
-                modifier = Modifier
-                    // Fit the whole photo inside the card (PREQUEL does the same): a full-width
-                    // aspect-ratio box is taller than the card for portrait photos and gets
-                    // clipped, which cuts off the edges of edge-to-edge looks (e.g. KUJI's paper
-                    // frames and YESTERDAY's date stamp).
-                    .aspectRatio(aspect)
-                    .clip(RoundedCornerShape(14.dp)),
+            CanvasPhotoViewport(
+                photo = photo, params = canvas, editing = canvasEditing,
+                onBegin = onCanvasBegin, onEnd = onCanvasEnd, onTransform = onCanvasTransform,
             ) {
                 if (effect != null) {
                     GpuOrCpuEffectImage(
@@ -143,7 +145,9 @@ fun PhotoPreviewCard(
                     Image(
                         bitmap = bitmap.asImageBitmap(),
                         contentDescription = null,
-                        contentScale = ContentScale.Fit,
+                        // The viewport owns aspect fitting. Fill its source layer so rounded
+                        // decode sizes cannot insert a fractional letterbox before geometry.
+                        contentScale = ContentScale.FillBounds,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -226,7 +230,9 @@ fun PhotoPreviewCard(
                 letterSpacing = 1.2.sp,
             )
             Text(
-                text = if (effect != null) {
+                text = if (canvasEditing) {
+                    "Drag to position · pinch to zoom"
+                } else if (effect != null) {
                     "Hold to compare · $strengthLabel"
                 } else {
                     "Pick a preset below"
@@ -267,7 +273,7 @@ private fun GpuOrCpuEffectImage(
                 Image(
                     bitmap = bitmap.asImageBitmap(),
                     contentDescription = null,
-                    contentScale = ContentScale.Fit,
+                    contentScale = ContentScale.FillBounds,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -280,31 +286,36 @@ private fun GpuOrCpuEffectImage(
     // the photo during the final Canvas draw.
     val stampLayer = rememberStampLayer(effect.stamp, renderSize.width, renderSize.height)
     val stampPaint = remember(effect.stamp) { AndroidPaint() }
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
 
     Box(modifier) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            if (showOriginal) return@Canvas
-            val scaleX = size.width / graph.width
-            val scaleY = size.height / graph.height
-            graph.update(programs, photo.seed, intensity / 100f)
-            drawIntoCanvas { canvas ->
-                val native = canvas.nativeCanvas
-                val save = native.save()
-                native.scale(scaleX, scaleY)
-                native.drawRenderNode(graph.root)
-                if (stampLayer != null && intensity > 0 && effect.stampIntensity > 0f) {
-                    stampPaint.alpha =
-                        ((intensity / 100f * effect.stampIntensity).coerceIn(0f, 1f) * 255f).roundToInt()
-                    native.drawBitmap(stampLayer.bitmap, stampLayer.left, stampLayer.top, stampPaint)
+        // Refresh the drawing node after modal focus changes so its external RenderNode is
+        // recorded again. Keep the graph/shaders above this key, independent of window focus.
+        key(windowFocused) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                if (showOriginal) return@Canvas
+                val scaleX = size.width / graph.width
+                val scaleY = size.height / graph.height
+                graph.update(programs, photo.seed, intensity / 100f)
+                drawIntoCanvas { canvas ->
+                    val native = canvas.nativeCanvas
+                    val save = native.save()
+                    native.scale(scaleX, scaleY)
+                    native.drawRenderNode(graph.root)
+                    if (stampLayer != null && intensity > 0 && effect.stampIntensity > 0f) {
+                        stampPaint.alpha =
+                            ((intensity / 100f * effect.stampIntensity).coerceIn(0f, 1f) * 255f).roundToInt()
+                        native.drawBitmap(stampLayer.bitmap, stampLayer.left, stampLayer.top, stampPaint)
+                    }
+                    native.restoreToCount(save)
                 }
-                native.restoreToCount(save)
             }
         }
         if (showOriginal) {
             Image(
                 bitmap = bitmap.asImageBitmap(),
                 contentDescription = null,
-                contentScale = ContentScale.Fit,
+                contentScale = ContentScale.FillBounds,
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -410,7 +421,7 @@ private fun CpuEffectImage(
         Image(
             bitmap = bitmap.asImageBitmap(),
             contentDescription = null,
-            contentScale = ContentScale.Fit,
+            contentScale = ContentScale.FillBounds,
             modifier = modifier,
         )
     } else {

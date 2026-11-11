@@ -59,6 +59,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
@@ -78,6 +79,8 @@ import com.aliahad.photoeffects.effect.EditStage
 import com.aliahad.photoeffects.filter.FilterRegistry
 import com.aliahad.photoeffects.effect.render.EffectBitmapRenderer
 import com.aliahad.photoeffects.photo.LoadedPhoto
+import com.aliahad.photoeffects.canvas.CanvasParams
+import com.aliahad.photoeffects.canvas.CanvasBitmapRenderer
 import com.aliahad.photoeffects.ui.theme.EditorColors
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
@@ -129,6 +132,7 @@ fun EffectsPanel(
             adjustStage,
             state.adjustParams.hashCode(),
             isFilters,
+            state.canvasParams,
         )
     } else {
         emptyMap()
@@ -309,6 +313,7 @@ private fun rememberEffectThumbnails(
     adjustStage: EditStage?,
     adjustKey: Int,
     isFilters: Boolean,
+    canvas: CanvasParams,
 ): Map<String, Bitmap> {
     val thumbnails by produceState<Map<String, Bitmap>>(
         emptyMap(),
@@ -319,6 +324,7 @@ private fun rememberEffectThumbnails(
         adjustStage,
         adjustKey,
         isFilters,
+        canvas,
     ) {
         value = emptyMap()
         val p = photo ?: return@produceState
@@ -331,7 +337,7 @@ private fun rememberEffectThumbnails(
         } ?: "none"
         for (effect in catalogue) {
             ensureActive()
-            val key = "${p.id}|$isFilters|${effect.id}|$adjustKey|$otherKey"
+            val key = "${p.id}|$isFilters|${effect.id}|$adjustKey|$otherKey|$canvas"
             val cached = thumbnailCache.get(key)
             if (cached != null) {
                 value = value + (effect.id to cached)
@@ -344,13 +350,21 @@ private fun rememberEffectThumbnails(
                 } else {
                     EditComposition.compose(otherStage, adjustStage, stage)
                 }
-                EffectBitmapRenderer.renderThumbnail(
+                val look = EffectBitmapRenderer.renderThumbnail(
                     source = source,
                     effect = requireNotNull(composed),
                     intensityPercent = 100,
                     seed = p.seed,
                     cancel = { job?.isActive == false },
                 )
+                if (canvas.isIdentity) look else try {
+                    CanvasBitmapRenderer.render(
+                        look, canvas.geometry(p.sourceWidth, p.sourceHeight),
+                        cancel = { job?.isActive == false },
+                    )
+                } finally {
+                    if (look !== source) look.recycle()
+                }
             }
             thumbnailCache.put(key, rendered)
             value = value + (effect.id to rendered)
@@ -564,6 +578,8 @@ fun IntensitySlider(
     modifier: Modifier = Modifier,
     valueRange: IntRange = 0..100,
     neutralValue: Int = 0,
+    description: String = "intensity_slider",
+    accessibilityLabel: String = description,
 ) {
     var widthPx by remember { mutableStateOf(1f) }
     val currentOnValueChange by rememberUpdatedState(onValueChange)
@@ -598,8 +614,9 @@ fun IntensitySlider(
                     }
                 }
             }
+            .testTag(description)
             .semantics {
-                contentDescription = "intensity_slider"
+                contentDescription = accessibilityLabel
                 progressBarRangeInfo = ProgressBarRangeInfo(
                     value.toFloat(), valueRange.first.toFloat()..valueRange.last.toFloat(),
                     valueRange.last - valueRange.first - 1,

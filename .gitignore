@@ -15,5 +15,5 @@ captures/
 local.properties
 .DS_Store
 
-# PREQUEL research corpus and verification evidence (kept out of the app repo)
+# Local research and verification artifacts (kept out of the app repo)
 docs/

@@ -5,7 +5,7 @@ package com.aliahad.photoeffects.effect.cpu
  *
  * Implemented as three successive box-blur passes (`BoxBlur.blurFloatFast`, O(n) each), which
  * converge to a gaussian; sigma (in pixels) maps to a box radius of roughly sigma - 0.5.
- * Used by the YESTERDAY pre-blur and the SENSUAL soft-focus + masked variable blur.
+ * Used by the DAYMARK pre-blur and the VELOUR soft-focus + masked variable blur.
  *
  * Pure Kotlin, deterministic, no Android dependencies.
  */

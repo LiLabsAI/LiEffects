@@ -23,11 +23,20 @@ class ExportBudgetTest {
     }
 
     @Test
+    fun lightweight_effect_budget_rounds_down_to_the_heap_fraction() {
+        val heap = 512L * 1024 * 1024
+        for (id in listOf("nocturne_gilded", "nocturne_afterhours", "marquee_premiere", "marquee_midnight")) {
+            val effect = requireNotNull(EffectRegistry.byId(id))
+            assertEquals(13_421_772, ExportBudget.maxPixels(effect, heap))
+        }
+    }
+
+    @Test
     fun light_effects_export_larger_than_heavy_ones() {
         val heap = 512L * 1024 * 1024
-        val focal = ExportBudget.maxPixels(EffectRegistry.byId("focal_1"), heap)
-        val halation = ExportBudget.maxPixels(EffectRegistry.byId("halation_1"), heap)
-        val sensual = ExportBudget.maxPixels(EffectRegistry.byId("sensual_1"), heap)
+        val focal = ExportBudget.maxPixels(EffectRegistry.byId("prism_1"), heap)
+        val halation = ExportBudget.maxPixels(EffectRegistry.byId("lumen_1"), heap)
+        val sensual = ExportBudget.maxPixels(EffectRegistry.byId("velour_1"), heap)
         assertTrue("focal ($focal) must allow a 12 MP photo", focal >= 12_000_000)
         assertTrue("focal ($focal) > halation ($halation)", focal > halation)
         assertTrue("halation ($halation) > sensual ($sensual)", halation > sensual)
@@ -35,7 +44,7 @@ class ExportBudgetTest {
 
     @Test
     fun heavy_effect_export_beats_the_old_1440_cap() {
-        val pixels = ExportBudget.maxPixels(EffectRegistry.byId("halation_1"), 512L * 1024 * 1024)
+        val pixels = ExportBudget.maxPixels(EffectRegistry.byId("lumen_1"), 512L * 1024 * 1024)
         val (w, h) = ExportBudget.targetSize(4000, 3000, pixels)
         assertTrue("12 MP export would still be $w x $h", w > 1440 && h > 1080)
     }
@@ -63,7 +72,7 @@ class ExportBudgetTest {
 
     @Test
     fun tiny_heap_falls_back_to_the_previous_export_resolution() {
-        val pixels = ExportBudget.maxPixels(EffectRegistry.byId("sensual_1"), 128L * 1024 * 1024)
+        val pixels = ExportBudget.maxPixels(EffectRegistry.byId("velour_1"), 128L * 1024 * 1024)
         assertEquals(ExportBudget.MIN_PIXELS, pixels)
     }
 

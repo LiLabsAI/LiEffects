@@ -3,22 +3,22 @@ package com.aliahad.photoeffects.effect
 import kotlin.math.min
 
 /**
- * Procedural dot-matrix date stamp of the PREQUEL "yesterday" pack ("Date" tool).
+ * Procedural dot-matrix date stamp for Daymark.
  *
- * Geometry is fitted from the full-resolution PREQUEL export on the same photo
- * (`docs/prequel-research/device-packs/exports/`, spec `yesterday-rewrite-spec.md` §1.6):
+ * Geometry is calibrated in normalized source coordinates
+ * :
  *
  *  - text: current local date formatted `DD MM 'YY` (e.g. `27 10 '26`)
  *  - 5x7 dot-matrix glyphs (standard font, apostrophe = 2-dot vertical mark in a 2-wide cell),
  *    1-dot gap between glyphs, 2-dot-wide space
  *  - dot pitch 4.32 px per 1080-scale minimum dimension (approx. 6.4 px on the 1600-wide export)
- *  - dot radius 0.35 x pitch (thin PREQUEL dots), amber `#F8CF96`, soft 1px edge
+ *  - dot radius 0.35 x pitch (thin dots), amber `#F8CF96`, soft 1px edge
  *  - in-photo orientation = readable text rotated 90 degrees counter-clockwise:
  *    text runs bottom->top, glyph tops face left
  *  - bbox: left edge at 6.25 % of W, bottom edge at 82.78 % of H (44 x 280 px on 1600x2398)
  *
  * One shared layout generator feeds BOTH paths so preview and export agree:
- *  - `CpuYesterdayRenderer` rasterises the dots into the pixel buffer (thumbnails/export),
+ *  - `CpuDaymarkRenderer` rasterises the dots into the pixel buffer (thumbnails/export),
  *  - `PhotoPreviewCard` draws the same dots as a Compose canvas overlay (GPU preview).
  *
  * Pure Kotlin: deterministic and JVM-testable.
@@ -55,7 +55,7 @@ object DotMatrixDate {
     const val LEFT_FRAC = 0.0625f
     /** Stamp bbox bottom edge as a fraction of H. */
     const val BOTTOM_FRAC = 0.8278f
-    /** Amber dot colour (`#F8CF96`, sampled from the PREQUEL export). */
+    /** Amber dot colour (`#F8CF96`). */
     const val STAMP_COLOR_RGB = 0xF8CF96L
 
     private const val GLYPH_COLS = 5
@@ -100,7 +100,7 @@ object DotMatrixDate {
         val sc = min(width, height) / 1080f
         val pitch = PITCH_1080 * sc
         val radius = RADIUS_RATIO * pitch
-        // bbox measured from the PREQUEL export: left edge + bottom edge relative anchors.
+        // Calibrated bounding box: left edge + bottom edge relative anchors.
         val left = LEFT_FRAC * width
         val bottom = BOTTOM_FRAC * height
 

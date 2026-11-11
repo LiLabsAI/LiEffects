@@ -3,7 +3,7 @@ package com.aliahad.photoeffects.adjust
 /**
  * AGSL programs for the Adjust stage. The four pass sources mirror the CPU passes:
  * colour/HSL → detail → blur/refocus → optical/stylize finish. All controls are uniforms; only
- * the layer bits change pass topology. No PREQUEL assets or LUTs are used.
+ * the layer bits change pass topology. No external assets or LUTs are used.
  */
 internal const val ADJUST_UNIFORMS_AGSL = """
 uniform shader content;
@@ -14,6 +14,7 @@ uniform float uExposure;
 uniform float uBrightness;
 uniform float uContrast;
 uniform float uHighlights;
+uniform float uWhites;
 uniform float uShadows;
 uniform float uBlackPoint;
 uniform float uFade;
@@ -32,6 +33,7 @@ uniform float uUltrasharp;
 uniform float uClarity;
 uniform float uDehaze;
 uniform float uMidtoneDetails;
+uniform float uChromaDenoise;
 uniform float uGrain;
 uniform float uGrainSize;
 uniform float uDust;
@@ -242,6 +244,10 @@ half4 main(float2 coord) {
             c += (-0.10 * uBlackPoint) * (1.0 - c);
         }
     }
+    if (uWhites != 0.0) {
+        float peak = clamp(max(c.r, max(c.g, c.b)), 0.0, 1.0);
+        c *= 1.0 + 0.20 * uWhites * peak * peak * peak;
+    }
     if (uFade != 0.0) {
         float f = 0.14 * uFade;
         c = f + c * (1.0 - f);
@@ -308,6 +314,36 @@ half4 main(float2 coord) {
 """
 
 internal const val ADJUST_DETAIL_AGSL = ADJUST_UNIFORMS_AGSL + ADJUST_COMMON_AGSL + """
+float3 adjustDenoiseChroma(float2 coord, float3 source) {
+    if (uOriginalAlpha.eval(coord).a <= 0.0) return source;
+    float luma = adjustLuma(source);
+    float3 chroma = source - luma;
+    float radius = max(1.0, floor(min(uResolution.x, uResolution.y) / 1080.0 + 0.5));
+    float3 sum = float3(0.0);
+    float total = 0.0;
+    for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+            float4 neighbor = adjustVertex(adjustClampCoord(coord + float2(float(x), float(y)) * radius));
+            if (neighbor.a > 0.0) {
+                float3 rgb = neighbor.rgb / neighbor.a;
+                float neighborLuma = adjustLuma(rgb);
+                float3 neighborChroma = rgb - neighborLuma;
+                float3 delta = neighborChroma - chroma;
+                float weight = (x == 0 ? 2.0 : 1.0) * (y == 0 ? 2.0 : 1.0) * neighbor.a;
+                weight *= 1.0 - smoothstep(0.04, 0.18, abs(neighborLuma - luma));
+                weight *= 1.0 - smoothstep(0.02, 0.14, dot(delta, delta));
+                sum += neighborChroma * weight;
+                total += weight;
+            }
+        }
+    }
+    chroma = mix(chroma, sum / total, uChromaDenoise);
+    float rScale = chroma.r > 0.0 ? (1.0 - luma) / chroma.r : (chroma.r < 0.0 ? -luma / chroma.r : 1.0);
+    float gScale = chroma.g > 0.0 ? (1.0 - luma) / chroma.g : (chroma.g < 0.0 ? -luma / chroma.g : 1.0);
+    float bScale = chroma.b > 0.0 ? (1.0 - luma) / chroma.b : (chroma.b < 0.0 ? -luma / chroma.b : 1.0);
+    return luma + chroma * min(1.0, min(rScale, min(gScale, bScale)));
+}
+
 half4 main(float2 coord) {
     coord = adjustPixelCenter(coord);
     float4 src = adjustContent(coord);
@@ -318,6 +354,7 @@ half4 main(float2 coord) {
     float3 wide = adjustBlur9(coord, wideRadius);
     float wideLuma = adjustLuma(wide);
 
+    if (uChromaDenoise != 0.0) c = adjustDenoiseChroma(coord, c);
     if (uCleanup != 0.0) {
         float detail = abs(luma - wideLuma);
         float lowDetail = 1.0 - smoothstep(0.02, 0.12, detail);

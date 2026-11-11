@@ -12,12 +12,12 @@ import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.ViewModelProvider
 import com.aliahad.photoeffects.effect.cpu.BlurMaskData
 import com.aliahad.photoeffects.effect.cpu.BlurMaskStore
-import com.aliahad.photoeffects.effect.cpu.FocalLutData
-import com.aliahad.photoeffects.effect.cpu.FocalLutStore
-import com.aliahad.photoeffects.effect.cpu.KujiFrameData
-import com.aliahad.photoeffects.effect.cpu.KujiFrameStore
-import com.aliahad.photoeffects.effect.FocalFamily
-import com.aliahad.photoeffects.effect.KujiFamily
+import com.aliahad.photoeffects.effect.cpu.PrismLutData
+import com.aliahad.photoeffects.effect.cpu.PrismLutStore
+import com.aliahad.photoeffects.effect.cpu.PaperlightFrameData
+import com.aliahad.photoeffects.effect.cpu.PaperlightFrameStore
+import com.aliahad.photoeffects.effect.PrismFamily
+import com.aliahad.photoeffects.effect.PaperlightFamily
 import com.aliahad.photoeffects.diagnostics.RenderDiagnostics
 import com.aliahad.photoeffects.ui.editor.EditorRoute
 import com.aliahad.photoeffects.ui.editor.EditorViewModel
@@ -32,10 +32,10 @@ class MainActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         // All look assets are needed by the very first thumbnail pass. Decode them before the UI
         // so CPU thumbnails and the GPU preview see the same data (historical async mask load
-        // raced the first render and produced mismatched Sensual thumbnails).
+        // raced the first render and produced mismatched Velour thumbnails).
         loadBlurMask()
-        loadKujiFrames()
-        loadFocalLuts()
+        loadPaperlightFrames()
+        loadPrismLuts()
         // This explicit debug launch has no editor or background thumbnail bootstrap competing
         // with the measurements. Release builds ignore the extra and open the normal editor.
         if (intent.getBooleanExtra("render_diagnostics", false) &&
@@ -65,8 +65,8 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Decode the bundled PREQUEL adj-Blur mask (`assets/blurmask.jpg`) into the process-wide
-     * [BlurMaskStore] used by the SENSUAL CPU pipeline (thumbnails + export). The GPU preview
+     * Decode the bundled radial blur mask (`assets/blurmask.jpg`) into the process-wide
+     * [BlurMaskStore] used by the VELOUR CPU pipeline (thumbnails + export). The GPU preview
      * binds the same asset directly as a shader input.
      */
     private fun loadBlurMask() {
@@ -87,14 +87,14 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Decode the five bundled KUJI frame overlays (`assets/kuji_frame_N.png`) into the
-     * process-wide [KujiFrameStore]. They are downscaled to a 1080-px long edge (the preview cap)
+     * Decode the five bundled PAPERLIGHT frame overlays (`assets/paperlight_frame_N.png`) into the
+     * process-wide [PaperlightFrameStore]. They are downscaled to a 1080-px long edge (the preview cap)
      * to keep memory bounded; the GPU preview binds the full-resolution PNG directly. Decoded
      * before `setContent` because the first Effects-panel thumbnail pass needs them.
      */
-    private fun loadKujiFrames() {
+    private fun loadPaperlightFrames() {
         val assets = applicationContext.assets
-        for (params in KujiFamily.presets) {
+        for (params in PaperlightFamily.presets) {
             runCatching {
                 val options = BitmapFactory.Options().apply { inSampleSize = 2 }
                 val bitmap = assets.open(params.frameAsset).use {
@@ -114,9 +114,9 @@ class MainActivity : ComponentActivity() {
                 }
                 val pixels = IntArray(scaled.width * scaled.height)
                 scaled.getPixels(pixels, 0, scaled.width, 0, 0, scaled.width, scaled.height)
-                KujiFrameStore.put(
+                PaperlightFrameStore.put(
                     params.frameAsset,
-                    KujiFrameData(pixels, scaled.width, scaled.height),
+                    PaperlightFrameData(pixels, scaled.width, scaled.height),
                 )
                 if (scaled !== bitmap) scaled.recycle()
                 bitmap.recycle()
@@ -125,21 +125,21 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Decode the bundled FOCAL LUT atlas (`assets/focal_luts.png`, six 198x198 blocks) into the
-     * process-wide [FocalLutStore]. Decoded before `setContent` because the Effects-panel
+     * Decode the bundled PRISM LUT atlas (`assets/prism_luts.png`, six 198x198 blocks) into the
+     * process-wide [PrismLutStore]. Decoded before `setContent` because the Effects-panel
      * thumbnail pass needs the CPU LUTs immediately; the GPU preview binds the same PNG directly.
      */
-    private fun loadFocalLuts() {
+    private fun loadPrismLuts() {
         runCatching {
-            val bitmap = applicationContext.assets.open("focal_luts.png").use {
+            val bitmap = applicationContext.assets.open("prism_luts.png").use {
                 BitmapFactory.decodeStream(it)
             } ?: return
             val pixels = IntArray(bitmap.width * bitmap.height)
             bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-            for (params in FocalFamily.presets) {
-                FocalLutStore.put(
+            for (params in PrismFamily.presets) {
+                PrismLutStore.put(
                     params.id,
-                    FocalLutData.fromAtlas(pixels, bitmap.width, params.lutIndex),
+                    PrismLutData.fromAtlas(pixels, bitmap.width, params.lutIndex),
                 )
             }
             bitmap.recycle()

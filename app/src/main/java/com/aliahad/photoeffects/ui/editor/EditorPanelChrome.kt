@@ -27,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -102,6 +103,7 @@ internal fun EditorPanelAction(
     enabled: Boolean,
     description: String,
     onClick: () -> Unit,
+    accessibilityLabel: String = description,
 ) {
     Text(
         text = label,
@@ -112,7 +114,8 @@ internal fun EditorPanelAction(
             .clip(androidx.compose.foundation.shape.RoundedCornerShape(50))
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 8.dp, vertical = 6.dp)
-            .semantics { contentDescription = description },
+            .testTag(description)
+            .semantics { contentDescription = accessibilityLabel },
     )
 }
 

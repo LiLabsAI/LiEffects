@@ -19,6 +19,9 @@ import com.aliahad.photoeffects.effect.EditComposition
 import com.aliahad.photoeffects.effect.EditStage
 import com.aliahad.photoeffects.filter.FilterRegistry
 import com.aliahad.photoeffects.filter.FilterControl
+import com.aliahad.photoeffects.canvas.CanvasParams
+import com.aliahad.photoeffects.canvas.CanvasRatio
+import com.aliahad.photoeffects.canvas.CanvasControl
 import kotlin.math.roundToInt
 import com.aliahad.photoeffects.photo.ExportOptions
 import com.aliahad.photoeffects.photo.ExportPlan
@@ -80,6 +83,10 @@ class EditorState internal constructor(
         private set
     var adjustParams by mutableStateOf(restored?.edit?.adjust ?: AdjustParams())
         private set
+    var canvasParams by mutableStateOf(restored?.edit?.canvas ?: CanvasParams())
+        private set
+    var canvasControl by mutableStateOf(restored?.canvasControl ?: CanvasControl.Ratio)
+        private set
     var adjustCategory by mutableStateOf(restored?.adjustCategory ?: AdjustCategory.Light)
     var adjustControl by mutableStateOf(restored?.adjustControl ?: AdjustControl.Exposure)
     var hslBand by mutableStateOf(restored?.hslBand ?: HslBand.Red)
@@ -113,12 +120,12 @@ class EditorState internal constructor(
 
     val resolutionOptions: List<ResolutionOption>
         get() = photo?.let {
-            ExportPlanner.resolutionOptions(it.sourceWidth, it.sourceHeight, renderEffect)
+            ExportPlanner.resolutionOptions(it.sourceWidth, it.sourceHeight, renderEffect, canvas = canvasParams)
         } ?: emptyList()
 
     val exportPlan: ExportPlan?
         get() = photo?.let {
-            ExportPlanner.plan(it.sourceWidth, it.sourceHeight, exportOptions, renderEffect)
+            ExportPlanner.plan(it.sourceWidth, it.sourceHeight, exportOptions, renderEffect, canvas = canvasParams)
         }
 
     /** Undo stores both selections, so switching tools never drops the other edit. */
@@ -151,6 +158,7 @@ class EditorState internal constructor(
         get() = when (activeTool) {
             EditorTool.Filters -> selectedFilter
             EditorTool.Adjust -> selectedAdjust
+            EditorTool.Canvas -> null
             else -> selectedEffect
         }
 
@@ -167,6 +175,7 @@ class EditorState internal constructor(
             },
             if (!adjustParams.isIdentity) "Adjust ${adjustParams.editedControlCount} edit(s)" else null,
             selection?.let { "Effect ${it.intensity}%" },
+            if (!canvasParams.isIdentity) canvasParams.ratio.displayName else null,
         ).joinToString(" · ")
 
     val intensity: Int
@@ -228,6 +237,8 @@ class EditorState internal constructor(
                     selection = null
                     filterSelection = null
                     adjustParams = AdjustParams()
+                    canvasParams = CanvasParams()
+                    canvasControl = CanvasControl.Ratio
                     adjustCategory = AdjustCategory.Light
                     adjustControl = AdjustControl.Exposure
                     hslBand = HslBand.Red
@@ -241,6 +252,7 @@ class EditorState internal constructor(
                     panelStage = PanelStage.Categories
                     showExportSheet = false
                 }
+                canvasParams = canvasParams.constrained(decoded.sourceWidth, decoded.sourceHeight)
             },
             onFailure = { failure ->
                 message = when {
@@ -335,14 +347,16 @@ class EditorState internal constructor(
         selection = previous.effect
         filterSelection = previous.filter
         adjustParams = previous.adjust
+        canvasParams = previous.canvas
     }
 
     fun resetAll() {
-        if (selection != null || filterSelection != null || !adjustParams.isIdentity) {
+        if (selection != null || filterSelection != null || !adjustParams.isIdentity || !canvasParams.isIdentity) {
             pushHistory()
             selection = null
             filterSelection = null
             adjustParams = AdjustParams()
+            canvasParams = CanvasParams()
             panelStage = PanelStage.Categories
             message = "Edits reset"
         } else {
@@ -355,7 +369,7 @@ class EditorState internal constructor(
     }
 
     /**
-     * Opens the PREQUEL-style export sheet. If the current resolution pick cannot be filled by
+     * Opens the photo-editor export sheet. If the current resolution pick cannot be filled by
      * this photo (e.g. 4K on a 1440×1920 shot), the selection snaps to the effective tier so
      * the highlighted option matches what Save will write.
      */
@@ -366,6 +380,7 @@ class EditorState internal constructor(
             current.sourceHeight,
             exportOptions.resolution,
             renderEffect,
+            canvas = canvasParams,
         )
         if (effective != exportOptions.resolution) {
             exportOptions = exportOptions.copy(resolution = effective)
@@ -390,7 +405,7 @@ class EditorState internal constructor(
         isSaving = true
         val effect = renderEffect
         try {
-            val result = PhotoSaver.save(context, currentPhoto, effect, 100, exportOptions)
+            val result = PhotoSaver.save(context, currentPhoto, effect, 100, exportOptions, canvasParams)
             message = if (result.success) {
                 "Saved ${result.width}×${result.height} to ${result.displayPath}"
             } else {
@@ -417,7 +432,7 @@ class EditorState internal constructor(
         recordHistory(snapshot())
     }
 
-    private fun snapshot() = EditSnapshot(selection, filterSelection, adjustParams)
+    private fun snapshot() = EditSnapshot(selection, filterSelection, adjustParams, canvasParams)
 
     private fun recordHistory(snapshot: EditSnapshot) {
         history.record(snapshot)
@@ -443,10 +458,11 @@ class EditorState internal constructor(
             hslComponent = hslComponent,
             exportOptions = exportOptions,
             exportSheet = showExportSheet,
+            canvasControl = canvasControl,
         )
     }
 
-    /** New photo, fresh export: back to the source-size default (PREQUEL's "large as source"). */
+    /** New photo, fresh export: back to the source-size default. */
     private fun resetExportResolution() {
         exportOptions = exportOptions.copy(resolution = ExportResolution.FOUR_K)
     }
@@ -541,10 +557,78 @@ class EditorState internal constructor(
     }
 
     fun clearActivePreset() {
+        if (activeTool == EditorTool.Canvas) {
+            resetCanvas()
+            return
+        }
         if (activeTool == EditorTool.Adjust) {
             resetAdjust()
             return
         }
         clearSelectedPreset()
+    }
+
+    fun selectCanvasControl(control: CanvasControl) {
+        canvasControl = control
+        panelStage = PanelStage.Items
+    }
+
+    fun editCanvas() { panelStage = PanelStage.Edit }
+
+    fun selectCanvasRatio(ratio: CanvasRatio) {
+        if (canvasParams.ratio == ratio) {
+            editCanvas()
+            return
+        }
+        pushHistory()
+        updateCanvas(canvasParams.copy(ratio = ratio))
+        panelStage = PanelStage.Items
+    }
+
+    fun rotateCanvas() {
+        pushHistory()
+        updateCanvas(canvasParams.copy(
+            quarterTurns = (canvasParams.quarterTurns + 1) % 4,
+            ratio = canvasParams.ratio.rotated(),
+        ))
+    }
+
+    fun flipCanvas() {
+        pushHistory()
+        updateCanvas(canvasParams.copy(mirrored = !canvasParams.mirrored))
+    }
+
+    fun resetCanvas() {
+        if (canvasParams.isIdentity) return
+        pushHistory()
+        canvasParams = CanvasParams()
+    }
+
+    fun centerCanvas() {
+        val centered = canvasParams.copy(centerX = 0.5, centerY = 0.5)
+        if (centered == canvasParams) return
+        pushHistory()
+        updateCanvas(centered)
+    }
+
+    fun beginCanvasGesture() {
+        if (dragSnapshot == null) dragSnapshot = snapshot()
+    }
+
+    fun finishCanvasGesture() = commitIntensityDrag()
+
+    fun setCanvasZoom(value: Float) { updateCanvas(canvasParams.copy(zoom = value.toDouble())) }
+    fun setCanvasStraighten(value: Float) { updateCanvas(canvasParams.copy(straighten = value.toDouble())) }
+
+    fun transformCanvas(zoom: Float, panX: Float, panY: Float, anchorX: Float, anchorY: Float) {
+        val p = photo ?: return
+        canvasParams = canvasParams.transformed(
+            p.sourceWidth, p.sourceHeight, zoom.toDouble(), panX.toDouble(), panY.toDouble(),
+            anchorX.toDouble(), anchorY.toDouble(),
+        )
+    }
+
+    private fun updateCanvas(params: CanvasParams) {
+        canvasParams = photo?.let { params.constrained(it.sourceWidth, it.sourceHeight) } ?: params.sanitized()
     }
 }

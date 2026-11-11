@@ -7,7 +7,7 @@ import android.graphics.Bitmap
  *
  * [sourceWidth] / [sourceHeight] are the full-resolution dimensions of the original (after EXIF
  * orientation), before the editor's [PhotoLoader.MAX_SOURCE_DIMENSION] downsample; the export
- * planner uses them to offer PREQUEL's resolution tiers.
+ * planner uses them to offer source-limited resolution tiers.
  *
  * [seed] is derived deterministically from the photo content so the same photo always
  * produces the same dust/grain pattern (and thumbnails match the full preview).

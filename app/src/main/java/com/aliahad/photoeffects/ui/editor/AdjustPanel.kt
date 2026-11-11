@@ -63,7 +63,7 @@ fun AdjustPanel(
                 PanelStage.Edit -> control.label
             },
             subtitle = when (stage) {
-                PanelStage.Categories -> "${state.adjustEditedCount} edit(s) · 57 controls"
+                PanelStage.Categories -> "${state.adjustEditedCount} edit(s) · ${AdjustControl.entries.size} controls"
                 PanelStage.Items -> "Choose a control"
                 PanelStage.Edit -> "${state.adjustCategory.label} · ${formatValue(state.adjustValue, control)}"
             },

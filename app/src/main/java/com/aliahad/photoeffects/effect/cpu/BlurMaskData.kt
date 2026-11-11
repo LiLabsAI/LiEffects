@@ -1,18 +1,9 @@
 package com.aliahad.photoeffects.effect.cpu
 
 /**
- * Bundled PREQUEL `adj-Blur` mask (recovered from the app's own static evidence, see
- * `docs/prequel-research/static-packs/evidence/adj-Blur/blurmask.jpg`).
- *
- * The mask is a 1920x1920 radial gradient: 0 at the centre (sharp), ~0.36 at edge midpoints and
- * ~0.82 in the corners. PREQUEL's "Blur" tool is a spatially-varying blur; the fitted
- * approximation used by this app is `B = sharp*(1-mask) + blurred*mask`, so the edges get the
- * full blur and the centre stays (mostly) sharp.
- *
- * The store is populated at app start from `assets/blurmask.jpg` (see `MainActivity`), so the
- * CPU film pipelines stay pure Kotlin/JVM-testable. JVM tests inject the same mask by decoding
- * the asset from disk. When no bitmap is available (e.g. a plain unit test) an analytic radial
- * fallback with the same profile is used.
+ * Decoded radial blur mask with bilinear scalar sampling. The mask is approximately
+ * 0.05 at the centre and 0.82 in the corners, keeping the centre sharper than the
+ * edges. The bitmap is loaded once and shared by the portrait-softening pipeline.
  */
 class BlurMaskData(val values: FloatArray, val width: Int, val height: Int) {
 

@@ -5,6 +5,9 @@ import com.aliahad.photoeffects.effect.EffectRegistry
 import com.aliahad.photoeffects.effect.EditComposition
 import com.aliahad.photoeffects.effect.EditStage
 import com.aliahad.photoeffects.filter.FilterRegistry
+import java.util.Random
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -26,13 +29,13 @@ class AdjustPipelineTest {
         CpuAdjustRenderer(params, planFor(params)).apply(input, width, height, 1f, 42L)
 
     @Test fun catalogueHasEveryRequestedControl() {
-        assertEquals(57, AdjustControl.entries.size)
+        assertEquals(59, AdjustControl.entries.size)
         assertEquals(
             mapOf(
-                AdjustCategory.Light to 10,
+                AdjustCategory.Light to 11,
                 AdjustCategory.Color to 7,
                 AdjustCategory.Hsl to 18,
-                AdjustCategory.Details to 5,
+                AdjustCategory.Details to 6,
                 AdjustCategory.Stylize to 4,
                 AdjustCategory.Refocus to 3,
                 AdjustCategory.Optical to 3,
@@ -40,7 +43,7 @@ class AdjustPipelineTest {
             ),
             AdjustCategory.entries.associateWith { AdjustControl.byCategory(it).size },
         )
-        assertEquals(57, AdjustControl.entries.map { it.id }.toSet().size)
+        assertEquals(59, AdjustControl.entries.map { it.id }.toSet().size)
         for (control in AdjustControl.entries) {
             assertTrue(control.toString(), control.neutral in control.range)
             assertTrue(control.toString(), control.range.first <= control.range.last)
@@ -50,6 +53,92 @@ class AdjustPipelineTest {
             assertEquals(band, AdjustControl.hslBandOf(control))
             assertEquals(component, AdjustControl.hslComponentOf(control))
         }
+    }
+
+    @Test fun whitesAndColorDenoiseMetadataAndDefaultsAreExplicit() {
+        val whites = AdjustControl.Whites
+        assertEquals(AdjustCategory.Light, whites.category)
+        assertEquals("Whites", whites.label)
+        assertEquals(-100..100, whites.range)
+        assertEquals(0, whites.neutral)
+        assertEquals(AdjustPass.Color, whites.pass)
+        assertTrue(whites.signed)
+        val light = AdjustControl.byCategory(AdjustCategory.Light)
+        assertEquals(whites, light[light.indexOf(AdjustControl.Highlights) + 1])
+
+        val denoise = AdjustControl.ChromaDenoise
+        assertEquals(AdjustCategory.Details, denoise.category)
+        assertEquals("Color denoise", denoise.label)
+        assertEquals(0..100, denoise.range)
+        assertEquals(0, denoise.neutral)
+        assertEquals(AdjustPass.Detail, denoise.pass)
+        assertFalse(denoise.signed)
+        val defaults = AdjustParams()
+        assertEquals(0, defaults.light.whites)
+        assertEquals(0, defaults.details.chromaDenoise)
+        assertEquals(0, defaults.value(whites))
+        assertEquals(0, defaults.value(denoise))
+        assertTrue(defaults.isIdentity)
+        assertEquals(0, defaults.editedControlCount)
+        assertEquals("uWhites", AdjustUniforms.WHITES)
+        assertEquals("uChromaDenoise", AdjustUniforms.CHROMA_DENOISE)
+    }
+
+    @Test fun whitesAndColorDenoiseClampValuesAndNormalizeUniforms() {
+        val defaults = AdjustParams()
+        for ((control, uniform) in listOf(
+            AdjustControl.Whites to AdjustUniforms.WHITES,
+            AdjustControl.ChromaDenoise to AdjustUniforms.CHROMA_DENOISE,
+        )) {
+            assertEquals(0f, defaults.scalarUniforms().getValue(uniform), 0f)
+            for (value in listOf(Int.MIN_VALUE, -100, -37, 0, 42, 100, Int.MAX_VALUE)) {
+                val expected = value.coerceIn(control.range)
+                val params = defaults.with(control, value)
+                assertEquals(control.name, expected, params.value(control))
+                assertEquals(expected / 100f, params.scalarUniforms().getValue(uniform), 0f)
+                assertEquals(expected == 0, params.isIdentity)
+                assertEquals(if (expected == 0) 0 else 1, params.editedControlCount)
+                assertEquals(0, defaults.value(control))
+            }
+        }
+        val both = defaults.with(AdjustControl.Whites, -37).with(AdjustControl.ChromaDenoise, 42)
+        assertEquals(-37, both.light.whites)
+        assertEquals(42, both.details.chromaDenoise)
+        assertEquals(-0.37f, both.scalarUniforms().getValue(AdjustUniforms.WHITES), 0f)
+        assertEquals(0.42f, both.scalarUniforms().getValue(AdjustUniforms.CHROMA_DENOISE), 0f)
+        assertEquals(2, both.editedControlCount)
+    }
+
+    @Test fun whitesAndColorDenoiseUseExpectedBudgetAndStickyDetailUntilReset() {
+        val whites = AdjustParams().with(AdjustControl.Whites, 60)
+        assertEquals(AdjustPlan(detail = false, blur = false, color = true), planFor(whites))
+        assertEquals(24, adjustBytesPerPixel(planFor(whites)))
+        assertEquals(AdjustParams(), whites.with(AdjustControl.Whites, 0))
+        val denoise = AdjustParams().with(AdjustControl.ChromaDenoise, 60)
+        assertEquals(AdjustPlan(detail = true, blur = false), planFor(denoise))
+        assertEquals(36, adjustBytesPerPixel(planFor(denoise)))
+        val both = whites.with(AdjustControl.ChromaDenoise, 60)
+        assertEquals(AdjustPlan(detail = true, blur = false, color = true), planFor(both))
+        assertEquals(36, adjustBytesPerPixel(planFor(both)))
+        assertEquals(denoise, both.reset(AdjustCategory.Light))
+        assertEquals(whites, both.reset(AdjustCategory.Details))
+
+        val neutral = denoise.with(AdjustControl.ChromaDenoise, 0)
+        assertTrue(neutral.isIdentity)
+        assertEquals(0, neutral.editedControlCount)
+        assertTrue(neutral.layers.detail)
+        assertEquals(planFor(denoise), planFor(neutral))
+        assertEquals(36, adjustBytesPerPixel(planFor(neutral)))
+        assertEquals(AdjustParams(), neutral.reset(AdjustCategory.Details))
+        assertEquals(24, adjustBytesPerPixel(planFor(neutral.reset(AdjustCategory.Details))))
+        assertEquals(AdjustParams(), both.reset(null))
+
+        // Cleanup shares Detail but lives in Light; resetting Details must not unmount it.
+        val cleanup = denoise.with(AdjustControl.Cleanup, 25).reset(AdjustCategory.Details)
+        assertEquals(0, cleanup.details.chromaDenoise)
+        assertEquals(25, cleanup.light.cleanup)
+        assertTrue(cleanup.layers.detail)
+        assertEquals(AdjustParams(), cleanup.reset(AdjustCategory.Light))
     }
 
     @Test fun identityAndIntensityZeroAreExactCopiesAndInputIsUntouched() {
@@ -67,6 +156,46 @@ class AdjustPipelineTest {
         assertArrayEquals(before, src)
     }
 
+    @Test fun newControlsPreserveIdentityAlphaAndInputAndRenderDeterministically() {
+        val src = chromaNoise()
+        val alphas = intArrayOf(0, 1, 64, 128, 255)
+        for (i in src.indices) src[i] = (alphas[i % alphas.size] shl 24) or (src[i] and 0xFFFFFF)
+        val before = src.copyOf()
+        for (control in listOf(AdjustControl.Whites, AdjustControl.ChromaDenoise)) {
+            val neutral = AdjustParams().with(control, 100).with(control, 0)
+            val identity = render(neutral, src)
+            assertArrayEquals(control.name, src, identity)
+            assertNotSame(src, identity)
+        }
+        for (params in listOf(
+            AdjustParams().with(AdjustControl.Whites, -100),
+            AdjustParams().with(AdjustControl.Whites, 100),
+            AdjustParams().with(AdjustControl.ChromaDenoise, 100),
+            AdjustParams().with(AdjustControl.Whites, 60).with(AdjustControl.ChromaDenoise, 70),
+        )) {
+            val renderer = CpuAdjustRenderer(params, planFor(params))
+            val out = renderer.apply(src, width, height, 1f, 42L)
+            assertNotSame(src, out)
+            assertArrayEquals(out, renderer.apply(src, width, height, 1f, 42L))
+            assertArrayEquals(out, renderer.apply(src, width, height, 1f, 99L))
+            assertArrayEquals(src, renderer.apply(src, width, height, 0f, 42L))
+            for (i in src.indices) assertEquals("alpha at $i", src[i] ushr 24, out[i] ushr 24)
+            assertArrayEquals(before, src)
+        }
+    }
+
+    @Test fun newControlsRenderClampedEndpointsExactly() {
+        val src = chromaNoise()
+        for (control in listOf(AdjustControl.Whites, AdjustControl.ChromaDenoise)) {
+            for ((requested, endpoint) in listOf(Int.MIN_VALUE to control.range.first, Int.MAX_VALUE to control.range.last)) {
+                val clamped = AdjustParams().with(control, requested)
+                val expected = AdjustParams().with(control, endpoint)
+                assertEquals(expected, clamped)
+                assertArrayEquals("${control.name} at $requested", render(expected, src), render(clamped, src))
+            }
+        }
+    }
+
     @Test fun everyControlChangesTheImageOrItsRefocusPartner() {
         val src = colorWheel()
         val failures = mutableListOf<String>()
@@ -81,10 +210,19 @@ class AdjustPipelineTest {
             if (control == AdjustControl.FocusPoint || control == AdjustControl.FocusRange) {
                 params = params.with(AdjustControl.RefocusAmount, 100)
             }
-            val input = if (control == AdjustControl.Skintone) {
-                IntArray(width * height) { 0xFFD08A5A.toInt() }
-            } else src
-            if (input.contentEquals(render(params, input))) failures += control.name
+            val input = when (control) {
+                AdjustControl.Skintone -> IntArray(width * height) { 0xFFD08A5A.toInt() }
+                AdjustControl.ChromaDenoise -> chromaNoise()
+                else -> src
+            }
+            val output = render(params, input)
+            if (control == AdjustControl.ChromaDenoise) {
+                assertFalse(
+                    "Color denoise must change chroma speckles; flat/local chroma may correctly be unchanged",
+                    input.contentEquals(output),
+                )
+            }
+            if (input.contentEquals(output)) failures += control.name
         }
         assertTrue("controls with no pixel change: $failures", failures.isEmpty())
     }
@@ -100,6 +238,26 @@ class AdjustPipelineTest {
         for (i in src.indices) if (src[i] != out[i]) changed++
         assertTrue("dust should stay sparse, changed=$changed", changed in 1 until w * h / 4)
     }
+
+    private fun chromaNoise(): IntArray {
+        val random = Random(73L)
+        return IntArray(width * height) {
+            // Opposite low-amplitude chroma speckles around gray: luma differs by only 0.0416/255.
+            val sign = if (random.nextBoolean()) 1 else -1
+            val r = 128 + 12 * sign
+            val g = 128 - 4 * sign
+            val b = 128 + 4 * sign
+            0xFF000000.toInt() or (r shl 16) or (g shl 8) or b
+        }
+    }
+
+    private fun chromaEnergy(pixels: IntArray): Double = pixels.sumOf { pixel ->
+        val luma = PixelMathLuma(pixel)
+        val r = ((pixel ushr 16) and 255) / 255.0 - luma
+        val g = ((pixel ushr 8) and 255) / 255.0 - luma
+        val b = (pixel and 255) / 255.0 - luma
+        r * r + g * g + b * b
+    } / pixels.size
 
     private fun colorWheel(w: Int = width, h: Int = height): IntArray = IntArray(w * h) { i ->
         val x = i % w
@@ -123,6 +281,121 @@ class AdjustPipelineTest {
             (((rgb[0] + m) * 255).toInt().coerceIn(0, 255) shl 16) or
             (((rgb[1] + m) * 255).toInt().coerceIn(0, 255) shl 8) or
             ((rgb[2] + m) * 255).toInt().coerceIn(0, 255)
+    }
+
+    @Test fun whitesPreserveBlackAndNeutralMonotoneRampsWhileTargetingHighlights() {
+        val ramp = IntArray(256) { 0xFF000000.toInt() or (it shl 16) or (it shl 8) or it }
+        for (value in listOf(-100, -50, 50, 100)) {
+            val params = AdjustParams().with(AdjustControl.Whites, value)
+            val out = CpuAdjustRenderer(params, planFor(params)).apply(ramp, 256, 1, 1f, 42L)
+            assertEquals("Whites $value must preserve black", ramp[0], out[0])
+            var previous = 0
+            for (i in ramp.indices) {
+                val r = (out[i] ushr 16) and 255
+                val g = (out[i] ushr 8) and 255
+                val b = out[i] and 255
+                val level = i / 255.0
+                val expected = (i * (1.0 + 0.20 * (value / 100.0) * level * level * level))
+                    .roundToInt().coerceIn(0, 255)
+                assertTrue("Whites $value at $i: expected $expected, got $r", abs(expected - r) <= 1)
+                assertEquals(r, g)
+                assertEquals(r, b)
+                assertTrue("Whites $value reversed ramp at $i", r >= previous)
+                previous = r
+            }
+            val midtoneDelta = (out[128] and 255) - 128
+            val highlightDelta = (out[224] and 255) - 224
+            assertTrue("Whites $value must follow its signed direction", highlightDelta * value > 0)
+            assertTrue("Whites must affect highlights much more than midtones", abs(highlightDelta) > 4 * abs(midtoneDelta))
+        }
+    }
+
+    @Test fun whitesApplyCommonRgbGainAfterBlackPointAndBeforeFade() {
+        val colors = intArrayOf(0xFFCC8844.toInt(), 0xFF4080C0.toInt())
+        val src = IntArray(width * height) { colors[it % colors.size] }
+        for (value in listOf(-100, 100)) for ((blackPoint, fade) in listOf(0 to 0, 50 to 60)) {
+            val params = AdjustParams().with(AdjustControl.Whites, value)
+                .with(AdjustControl.BlackPoint, blackPoint)
+                .with(AdjustControl.Fade, fade)
+            val out = render(params, src)
+            for (i in colors.indices) {
+                val bp = 0.12 * blackPoint / 100.0
+                val channels = listOf(16, 8, 0).map { shift ->
+                    ((((src[i] ushr shift) and 255) / 255.0 - bp) / (1.0 - bp)).coerceAtLeast(0.0)
+                }
+                val peak = channels.max().coerceIn(0.0, 1.0)
+                val gain = 1.0 + 0.20 * (value / 100.0) * peak * peak * peak
+                val f = 0.14 * fade / 100.0
+                for ((channel, shift) in listOf(16, 8, 0).withIndex()) {
+                    // One RGB gain preserves channel ratios until clipping; fade follows that gain.
+                    val expected = ((f + channels[channel] * gain * (1.0 - f)) * 255)
+                        .roundToInt().coerceIn(0, 255)
+                    val actual = (out[i] ushr shift) and 255
+                    assertTrue("Whites $value, black point $blackPoint, fade $fade, channel $channel", abs(expected - actual) <= 1)
+                }
+            }
+        }
+    }
+
+    @Test fun colorDenoiseReducesChromaEnergyMonotonicallyWithoutChangingLuma() {
+        val src = chromaNoise()
+        val initialEnergy = chromaEnergy(src)
+        var previousEnergy = initialEnergy
+        for (strength in listOf(25, 50, 75, 100)) {
+            val out = render(AdjustParams().with(AdjustControl.ChromaDenoise, strength), src)
+            for (i in src.indices) {
+                assertEquals("Color denoise $strength changed luma at $i", PixelMathLuma(src[i]), PixelMathLuma(out[i]), 1.0 / 255.0)
+            }
+            val energy = chromaEnergy(out)
+            assertTrue("Color denoise $strength must reduce chroma energy ($energy vs $previousEnergy)", energy < previousEnergy)
+            previousEnergy = energy
+        }
+        assertTrue("Full color denoise must meaningfully reduce speckles", previousEnergy < initialEnergy * 0.75)
+    }
+
+    @Test fun colorDenoisePreservesLumaWhenChromaNeedsGamutCompression() {
+        // Zero-blue-headroom yellows force gamut compression rather than channel clipping.
+        val src = IntArray(width * height) { i ->
+            if ((i % width + i / width) % 2 == 0) 0xFFC0C000.toInt() else 0xFFD0D000.toInt()
+        }
+        val out = render(AdjustParams().with(AdjustControl.ChromaDenoise, 100), src)
+        for (i in src.indices) {
+            assertEquals("Gamut compression changed luma at $i", PixelMathLuma(src[i]), PixelMathLuma(out[i]), 1.0 / 255.0)
+        }
+    }
+
+    @Test fun colorDenoisePreservesMonochromeTextureFlatColorsAndStrongEdges() {
+        val fixtures = linkedMapOf(
+            "monochrome texture" to IntArray(width * height) { i ->
+                val gray = (i % width * 37 + i / width * 17) and 255
+                0xFF000000.toInt() or (gray shl 16) or (gray shl 8) or gray
+            },
+            "strong luma edge" to IntArray(width * height) { i ->
+                if (i % width < width / 2) 0xFF503028.toInt() else 0xFFE0C8B8.toInt()
+            },
+            "strong nearly equal-luma chroma edge" to IntArray(width * height) { i ->
+                if (i % width < width / 2) 0xFFFF0000.toInt() else 0xFF004C00.toInt()
+            },
+        )
+        for (color in intArrayOf(0xFF000000.toInt(), 0xFFFFFFFF.toInt(), 0xFF806040.toInt(), 0xFFFF2080.toInt())) {
+            fixtures["flat color $color"] = IntArray(width * height) { color }
+        }
+        val params = AdjustParams().with(AdjustControl.ChromaDenoise, 100)
+        for ((name, src) in fixtures) assertArrayEquals(name, src, render(params, src))
+    }
+
+    @Test fun colorDenoiseIgnoresInvisibleNeighborChroma() {
+        val noise = chromaNoise()
+        val src = IntArray(width * height) { i ->
+            if (i % 3 == 0) noise[i] and 0xFFFFFF else 0xFF808080.toInt()
+        }
+        val out = render(AdjustParams().with(AdjustControl.ChromaDenoise, 100), src)
+        for (i in src.indices) {
+            assertEquals(src[i] ushr 24, out[i] ushr 24)
+            if (src[i] ushr 24 != 0) {
+                assertEquals("Invisible chroma must not bleed into visible pixel $i", src[i], out[i])
+            }
+        }
     }
 
     @Test fun exposureContrastAndSaturationDirectionsArePredictable() {
@@ -175,8 +448,8 @@ class AdjustPipelineTest {
 
     @Test fun threeStageCompositionUsesFilterAdjustEffectOrderAndBudget() {
         val src = source()
-        val filter = FilterRegistry.byId("g7x_1")!!
-        val effect = EffectRegistry.byId("yesterday_1")!!
+        val filter = FilterRegistry.byId("lucent_1")!!
+        val effect = EffectRegistry.byId("daymark_1")!!
         val params = AdjustParams().with(AdjustControl.Exposure, 25)
         val adjust = AdjustEffectFactory.create(params)
         val edit = EditComposition.compose(
@@ -193,9 +466,9 @@ class AdjustPipelineTest {
         )
         assertArrayEquals(expected, edit.cpu.apply(src, width, height, 1f, 9L))
         assertEquals(filter.id + "+" + adjust.id + "+" + effect.id, edit.id)
-        assertTrue(edit.displayName.contains("G7X"))
+        assertTrue(edit.displayName.contains("Lucent"))
         assertTrue(edit.displayName.contains("Adjust"))
-        assertTrue(edit.displayName.contains("Yesterday"))
+        assertTrue(edit.displayName.contains("Daymark"))
         assertNotNull(edit.stamp)
         assertEquals(0.4f, edit.stampIntensity, 0f)
         assertEquals(
@@ -211,6 +484,8 @@ class AdjustPipelineTest {
         for ((w, h) in listOf(1 to 1, 1 to 17, 17 to 1)) {
             val src = IntArray(w * h) { 0xFF8090A0.toInt() }
             val params = AdjustParams().with(AdjustControl.Exposure, 20)
+                .with(AdjustControl.Whites, 40)
+                .with(AdjustControl.ChromaDenoise, 60)
                 .with(AdjustControl.Sharpen, 30)
                 .with(AdjustControl.GaussianBlur, 10)
             val a = CpuAdjustRenderer(params, planFor(params)).apply(src, w, h, 1f, 5L)

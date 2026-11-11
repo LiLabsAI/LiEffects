@@ -47,7 +47,7 @@ import com.aliahad.photoeffects.photo.ResolutionOption
 import com.aliahad.photoeffects.ui.theme.EditorColors
 
 /**
- * PREQUEL-style export settings sheet: segmented Resolution / Quality / Metadata rows, a
+ * photo-editor export settings sheet: segmented Resolution / Quality / Metadata rows, a
  * full-width Save pill and the estimated file size underneath.
  */
 @OptIn(ExperimentalMaterial3Api::class)

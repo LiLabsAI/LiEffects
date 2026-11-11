@@ -72,7 +72,7 @@ class CpuAdjustRenderer(
 
     private fun hasColorWork(): Boolean = with(params) {
         light.exposure != 0 || light.brightness != 0 || light.contrast != 0 ||
-            light.highlights != 0 || light.shadows != 0 || light.blackPoint != 0 ||
+            light.highlights != 0 || light.whites != 0 || light.shadows != 0 || light.blackPoint != 0 ||
             light.fade != 0 || light.brilliance != 0 || light.pushPull != 0 ||
             color.saturation != 0 || color.vibrance != 0 || color.colorDensity != 0 ||
             color.temperature != 0 || color.tint != 0 || color.skintone != 0 ||
@@ -82,7 +82,7 @@ class CpuAdjustRenderer(
     private fun hasDetailWork(): Boolean = with(params) {
         light.cleanup != 0 || color.hdr != 0 || details.sharpen != 0 ||
             details.ultrasharp != 0 || details.clarity != 0 ||
-            details.dehaze != 0 || details.midtoneDetails != 0
+            details.dehaze != 0 || details.midtoneDetails != 0 || details.chromaDenoise != 0
     }
 
     private fun hasBlurWork(): Boolean = with(params) {
@@ -105,6 +105,7 @@ class CpuAdjustRenderer(
         val brightness = l.brightness / 100f
         val contrast = l.contrast / 100f
         val highlights = l.highlights / 100f
+        val whites = l.whites / 100f
         val shadows = l.shadows / 100f
         val blackPoint = l.blackPoint / 100f
         val fade = l.fade / 100f
@@ -193,6 +194,11 @@ class CpuAdjustRenderer(
                         val k = -0.10f * blackPoint
                         r += k * (1f - r); g += k * (1f - g); b += k * (1f - b)
                     }
+                }
+                if (whites != 0f) {
+                    val peak = maxOf(r, g, b).coerceIn(0f, 1f)
+                    val gain = 1f + 0.20f * whites * peak * peak * peak
+                    r *= gain; g *= gain; b *= gain
                 }
                 if (fade != 0f) {
                     val f = 0.14f * fade
@@ -292,7 +298,9 @@ class CpuAdjustRenderer(
         val clarity = d.clarity / 100f
         val dehaze = d.dehaze / 100f
         val midtone = d.midtoneDetails / 100f
+        val chromaDenoise = d.chromaDenoise / 100f
         val minDim = min(width, height)
+        val denoiseRadius = max(1, (minDim / 1080f).roundToInt())
         val wideRadius = max(minDim * 0.03f, 2f)
         // Same 9-tap support as ADJUST_DETAIL_AGSL; a box blur here caused visible CPU/GPU drift.
         val wide = FloatArray(input.size)
@@ -334,6 +342,10 @@ class CpuAdjustRenderer(
                 val luma = PixelMath.luma(r, g, b)
                 val wideL = wide[i]
 
+                if (chromaDenoise != 0f && src ushr 24 > 0) {
+                    denoiseChroma(input, width, height, x, y, denoiseRadius, chromaDenoise, blur3)
+                    r = blur3[0]; g = blur3[1]; b = blur3[2]
+                }
                 if (cleanup != 0f) {
                     colorBlur3(input, width, height, x, y, 2f, blur3, blurScratch)
                     val detail = abs(luma - wideL)
@@ -392,6 +404,48 @@ class CpuAdjustRenderer(
             }
         }
         return out
+    }
+
+    private fun denoiseChroma(
+        input: IntArray, width: Int, height: Int, x: Int, y: Int,
+        radius: Int, strength: Float, out: FloatArray,
+    ) {
+        val center = input[y * width + x]
+        val r = PixelMath.red(center)
+        val g = PixelMath.green(center)
+        val b = PixelMath.blue(center)
+        val luma = PixelMath.luma(r, g, b)
+        val cr = r - luma; val cg = g - luma; val cb = b - luma
+        var sumR = 0f; var sumG = 0f; var sumB = 0f; var total = 0f
+        for (dy in -1..1) for (dx in -1..1) {
+            val nx = (x + dx * radius).coerceIn(0, width - 1)
+            val ny = (y + dy * radius).coerceIn(0, height - 1)
+            val neighbor = input[ny * width + nx]
+            val alpha = (neighbor ushr 24) / 255f
+            if (alpha == 0f) continue
+            val nr = PixelMath.red(neighbor)
+            val ng = PixelMath.green(neighbor)
+            val nb = PixelMath.blue(neighbor)
+            val neighborLuma = PixelMath.luma(nr, ng, nb)
+            val ncr = nr - neighborLuma; val ncg = ng - neighborLuma; val ncb = nb - neighborLuma
+            val dr = ncr - cr; val dg = ncg - cg; val db = ncb - cb
+            var weight = (if (dx == 0) 2f else 1f) * (if (dy == 0) 2f else 1f) * alpha
+            weight *= 1f - PixelMath.smoothstep(0.04f, 0.18f, abs(neighborLuma - luma))
+            weight *= 1f - PixelMath.smoothstep(0.02f, 0.14f, dr * dr + dg * dg + db * db)
+            sumR += ncr * weight; sumG += ncg * weight; sumB += ncb * weight
+            total += weight
+        }
+        val outCr = PixelMath.mix(cr, sumR / total, strength)
+        val outCg = PixelMath.mix(cg, sumG / total, strength)
+        val outCb = PixelMath.mix(cb, sumB / total, strength)
+        // Uniform chroma compression keeps the original luminance when a channel leaves gamut.
+        val rScale = if (outCr > 0f) (1f - luma) / outCr else if (outCr < 0f) -luma / outCr else 1f
+        val gScale = if (outCg > 0f) (1f - luma) / outCg else if (outCg < 0f) -luma / outCg else 1f
+        val bScale = if (outCb > 0f) (1f - luma) / outCb else if (outCb < 0f) -luma / outCb else 1f
+        val scale = minOf(1f, rScale, gScale, bScale)
+        out[0] = luma + outCr * scale
+        out[1] = luma + outCg * scale
+        out[2] = luma + outCb * scale
     }
 
     private fun colorBlur3(

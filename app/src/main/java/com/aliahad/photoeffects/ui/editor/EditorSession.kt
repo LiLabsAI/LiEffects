@@ -10,6 +10,9 @@ import com.aliahad.photoeffects.adjust.AdjustParams
 import com.aliahad.photoeffects.adjust.HslBand
 import com.aliahad.photoeffects.adjust.HslComponent
 import com.aliahad.photoeffects.filter.FilterControl
+import com.aliahad.photoeffects.canvas.CanvasParams
+import com.aliahad.photoeffects.canvas.CanvasRatio
+import com.aliahad.photoeffects.canvas.CanvasControl
 import com.aliahad.photoeffects.photo.ExportMetadataMode
 import com.aliahad.photoeffects.photo.ExportOptions
 import com.aliahad.photoeffects.photo.ExportQuality
@@ -22,6 +25,7 @@ internal data class EditSnapshot(
     val effect: EffectSelection?,
     val filter: FilterSelection?,
     val adjust: AdjustParams,
+    val canvas: CanvasParams = CanvasParams(),
 )
 
 /** The bounded undo stack is observable even when committing a drag changes no pixels. */
@@ -66,6 +70,7 @@ internal data class EditorSession(
     val hslComponent: HslComponent = HslComponent.Hue,
     val exportOptions: ExportOptions? = null,
     val exportSheet: Boolean = false,
+    val canvasControl: CanvasControl = CanvasControl.Ratio,
 )
 
 /** Versioned, Android-independent format, also exercised by the JVM restoration tests. */
@@ -75,7 +80,7 @@ internal object EditorSessionCodec {
         fun put(key: String, value: Any?) {
             if (value != null) values.setProperty(key, value.toString())
         }
-        put("version", 1)
+        put("version", 2)
         put("source", session.sourceUri)
         writeEdit(values, "edit", session.edit)
         val history = session.history.takeLast(EditHistory.MAX_ENTRIES)
@@ -96,6 +101,7 @@ internal object EditorSessionCodec {
             put("metadata", it.metadata.name)
         }
         put("exportSheet", session.exportSheet)
+        put("canvasControl", session.canvasControl.name)
         return StringWriter().also { values.store(it, null) }.toString()
     }
 
@@ -103,7 +109,7 @@ internal object EditorSessionCodec {
         if (encoded == null || encoded.length > 256_000) return null
         return runCatching {
             val values = Properties().apply { load(StringReader(encoded)) }
-            if (values.getProperty("version") != "1") return null
+            if (values.getProperty("version") !in setOf("1", "2")) return null
             EditorSession(
                 sourceUri = values.getProperty("source"),
                 edit = readEdit(values, "edit"),
@@ -112,8 +118,8 @@ internal object EditorSessionCodec {
                 },
                 tool = values.enumValue("tool", EditorTool.Effects),
                 panel = values.enumValue("panel", PanelStage.Categories),
-                effectShelf = values.getProperty("effectShelf"),
-                filterShelf = values.getProperty("filterShelf"),
+                effectShelf = LegacyCatalogueNames.effectShelf(values.getProperty("effectShelf")),
+                filterShelf = LegacyCatalogueNames.filterShelf(values.getProperty("filterShelf")),
                 filterControl = values.enumValue("filterControl", FilterControl.Strength),
                 adjustCategory = values.enumValue("adjustCategory", AdjustCategory.Light),
                 adjustControl = values.enumValue("adjustControl", AdjustControl.Exposure),
@@ -125,6 +131,7 @@ internal object EditorSessionCodec {
                     metadata = values.enumValue("metadata", ExportMetadataMode.OVERRIDE),
                 ) else null,
                 exportSheet = values.getProperty("exportSheet").toBoolean(),
+                canvasControl = values.enumValue("canvasControl", CanvasControl.Ratio),
             )
         }.getOrNull()
     }
@@ -147,6 +154,11 @@ internal object EditorSessionCodec {
         // Retain neutral-but-mounted spatial layers so restored topology does not jump.
         values.setProperty("$prefix.detailLayer", edit.adjust.layers.detail.toString())
         values.setProperty("$prefix.blurLayer", edit.adjust.layers.blur.toString())
+        with(edit.canvas) {
+            values.setProperty("$prefix.canvas.ratio", ratio.name)
+            values.setProperty("$prefix.canvas.values", listOf(centerX, centerY, zoom, quarterTurns, straighten).joinToString(","))
+            values.setProperty("$prefix.canvas.mirrored", mirrored.toString())
+        }
     }
 
     private fun readEdit(values: Properties, prefix: String): EditSnapshot {
@@ -162,18 +174,26 @@ internal object EditorSessionCodec {
             ?.map { it.toIntOrNull() ?: 0 }.orEmpty()
         fun filterValue(index: Int, default: Int = 0, range: IntRange = 0..100) =
             controls.getOrElse(index) { default }.coerceIn(range)
+        val canvasValues = values.getProperty("$prefix.canvas.values")?.split(',').orEmpty()
+        fun canvasValue(index: Int, default: Double) = canvasValues.getOrNull(index)?.toDoubleOrNull() ?: default
         return EditSnapshot(
             effect = values.getProperty("$prefix.effect")?.let {
-                EffectSelection(it, values.int("$prefix.effectIntensity", 100).coerceIn(0, 100))
+                EffectSelection(LegacyCatalogueNames.effectId(it), values.int("$prefix.effectIntensity", 100).coerceIn(0, 100))
             },
             filter = values.getProperty("$prefix.filter")?.let {
                 FilterSelection(
-                    it, filterValue(0, 100), filterValue(1), filterValue(2, 100),
+                    LegacyCatalogueNames.filterId(it), filterValue(0, 100), filterValue(1), filterValue(2, 100),
                     filterValue(3), filterValue(4, range = -100..100),
                     filterValue(5, range = -100..100), filterValue(6),
                 )
             },
             adjust = adjust,
+            canvas = CanvasParams(
+                ratio = values.enumValue("$prefix.canvas.ratio", CanvasRatio.ORIGINAL),
+                centerX = canvasValue(0, 0.5), centerY = canvasValue(1, 0.5), zoom = canvasValue(2, 1.0),
+                quarterTurns = canvasValue(3, 0.0).toInt(), straighten = canvasValue(4, 0.0),
+                mirrored = values.getProperty("$prefix.canvas.mirrored").toBoolean(),
+            ).sanitized(),
         )
     }
 

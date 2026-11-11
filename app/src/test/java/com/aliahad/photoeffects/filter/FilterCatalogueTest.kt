@@ -23,6 +23,40 @@ class FilterCatalogueTest {
         assertEquals(1.2f, recipe.uniforms().getValue("uExposure"), 0f)
     }
 
+    @Test fun luxuryRecipesAppendSingleVariantFamiliesWithOnlyColourStrengthAndBoundUniforms() {
+        val expected = listOf("black_tie_1" to "Black Tie", "old_money_1" to "Old Money")
+        assertEquals(expected.map { it.first }, FilterRegistry.presets.takeLast(2).map { it.id })
+        for ((id, family) in expected) {
+            val p = FilterRegistry.paramsById(id)!!
+            val filter = FilterRegistry.byId(id)!!
+            assertEquals(family, p.family)
+            assertEquals(1, p.variant)
+            assertEquals(listOf(id), FilterRegistry.shelfById(family)!!.effects.map { it.id })
+            assertEquals("$family #1", filter.displayName)
+            assertEquals(p.summary, filter.summary)
+            assertTrue(p.summary.isNotBlank())
+            assertEquals(listOf(FilterControl.Strength), p.controls)
+            assertEquals(1f, p.strength, 0f)
+            assertEquals(0, p.sharpen)
+            assertEquals(0, p.grain)
+            assertEquals(0, p.highlights)
+            assertEquals(0, p.shadows)
+            assertEquals(0, p.aberration)
+            assertEquals(0f, p.softFocus, 0f)
+            assertEquals(16, filter.exportBytesPerPixel)
+            val gpu = filter.gpu
+            assertEquals(FILTER_AGSL, gpu.agslSource)
+            assertTrue(gpu.internalPasses.isEmpty())
+            assertNull(gpu.inputProgram)
+            assertEquals(p.uniforms(), gpu.uniforms)
+            val scalarUniforms = Regex("""uniform float (\w+);""").findAll(gpu.agslSource)
+                .map { it.groupValues[1] }.toSet()
+            // Frame intensity/resolution are renderer-owned; all recipe scalars must be bound.
+            assertEquals(scalarUniforms - "uIntensity", gpu.uniforms.keys)
+            assertEquals(0f, FilterRegistry.withControls(id, 0, 0)!!.gpu.uniforms.getValue("uFilterStrength"), 0f)
+        }
+    }
+
     @Test fun invalidCatalogueDataFailsWithAnActionableMessage() {
         val bad = listOf(
             valid.replace("schemaVersion=4", "schemaVersion=5"),

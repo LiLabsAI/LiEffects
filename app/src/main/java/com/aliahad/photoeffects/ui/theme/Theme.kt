@@ -10,7 +10,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-/** PREQUEL-inspired dark editor palette. */
+/** PhotoEffects dark editor palette. */
 object EditorColors {
     val Background = Color(0xFF0B0B0D)
     val Panel = Color(0xFF111115)

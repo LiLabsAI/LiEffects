@@ -7,7 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * PREQUEL's export rules (recovered from `km7` / `dn7` / `il7`): tiers are only offered when
+ * Source-limited export rules: tiers are only offered when
  * the source can fill them, the highest offered tier exports at source size, lower tiers use
  * their nominal long edge, quality maps to JPEG 95 / 75 / 40, and the estimate is
  * pixels × 0.35 / 0.18 / 0.09 bytes.
@@ -102,7 +102,7 @@ class ExportPlannerTest {
     }
 
     @Test
-    fun `requested tier unavailable falls back like prequel`() {
+    fun `requested tier unavailable falls back like reference`() {
         val plan = ExportPlanner.plan(1440, 1920, ExportOptions(resolution = ExportResolution.FOUR_K), null, heap)
         assertEquals(ExportResolution.FULL_HD, plan.resolution)
         assertEquals(1440, plan.width)
@@ -126,7 +126,7 @@ class ExportPlannerTest {
 
     @Test
     fun `budget caps the planned pixels for heavy effects`() {
-        val sensual = requireNotNull(EffectRegistry.byId("sensual_1"))
+        val sensual = requireNotNull(EffectRegistry.byId("velour_1"))
         val maxPixels = ExportBudget.maxPixels(sensual, heap)
         val plan = ExportPlanner.plan(4000, 3000, ExportOptions(), sensual, heap)
         assertTrue(plan.width < 4000)
@@ -142,14 +142,14 @@ class ExportPlannerTest {
     }
 
     @Test
-    fun `quality values match prequel jpeg qualities`() {
+    fun `quality values match reference jpeg qualities`() {
         assertEquals(40, ExportQuality.LOW.jpegQuality)
         assertEquals(75, ExportQuality.MEDIUM.jpegQuality)
         assertEquals(95, ExportQuality.HIGH.jpegQuality)
     }
 
     @Test
-    fun `estimates use prequel coefficients and whole megabytes`() {
+    fun `estimates use reference coefficients and whole megabytes`() {
         assertEquals(967_680L, ExportPlanner.estimateBytes(1440, 1920, ExportQuality.HIGH))
         assertEquals(497_664L, ExportPlanner.estimateBytes(1440, 1920, ExportQuality.MEDIUM))
         assertEquals(248_832L, ExportPlanner.estimateBytes(1440, 1920, ExportQuality.LOW))

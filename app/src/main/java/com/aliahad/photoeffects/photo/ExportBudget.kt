@@ -9,14 +9,14 @@ import kotlin.math.sqrt
  *
  * Each effect reports its peak render working set per pixel ([PhotoEffect.exportBytesPerPixel]),
  * including Java pixel arrays and native/JNI buffers;
- * the CPU mirror of HALATION/SENSUAL needs several full-frame float planes, so rendering a
+ * the CPU mirror of LUMEN/VELOUR needs several full-frame float planes, so rendering a
  * 12 MP photo directly would exhaust the heap. The budget keeps the render within
  * [HEAP_FRACTION] of the process heap and lets [PhotoSaver] fall back further on OOM.
  */
 object ExportBudget {
 
     /** Share of the process heap the render may use; the rest is the app's working set. */
-    private const val HEAP_FRACTION = 0.40f
+    private const val HEAP_FRACTION = 0.40
 
     /** Never export below the previous 1440 px long edge (≈1.55 MP on 4:3). */
     const val MIN_PIXELS = 1_500_000
@@ -33,9 +33,12 @@ object ExportBudget {
     fun maxPixels(
         effect: PhotoEffect?,
         maxMemoryBytes: Long = Runtime.getRuntime().maxMemory(),
+        additionalBytesPerPixel: Int = 0,
     ): Int {
+        require(additionalBytesPerPixel >= 0)
         val budgetBytes = (maxMemoryBytes * HEAP_FRACTION).toLong()
-        val pixels = (budgetBytes / bytesPerPixel(effect)).coerceAtMost(Int.MAX_VALUE.toLong())
+        val pixels = (budgetBytes / (bytesPerPixel(effect).toLong() + additionalBytesPerPixel))
+            .coerceAtMost(Int.MAX_VALUE.toLong())
         return pixels.toInt().coerceIn(MIN_PIXELS, MAX_PIXELS)
     }
 
