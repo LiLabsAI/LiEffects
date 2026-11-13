@@ -37,12 +37,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -93,7 +95,12 @@ fun PhotoPreviewCard(
     onCanvasTransform: (Float, Float, Float, Float, Float) -> Unit = { _, _, _, _, _ -> },
 ) {
     val bitmap = photo.bitmap
+    val imageBitmap = remember(bitmap) { bitmap.asImageBitmap() }
     val backdrop = rememberBackdrop(bitmap)
+    val latestOnHoldChange by rememberUpdatedState(onHoldChange)
+    DisposableEffect(Unit) {
+        onDispose { latestOnHoldChange(false) }
+    }
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -119,11 +126,11 @@ fun PhotoPreviewCard(
                 .pointerInput(photo.id, canvasEditing) {
                     if (canvasEditing) return@pointerInput
                     detectTapGestures(onPress = {
-                        onHoldChange(true)
+                        latestOnHoldChange(true)
                         try {
                             tryAwaitRelease()
                         } finally {
-                            onHoldChange(false)
+                            latestOnHoldChange(false)
                         }
                     })
                 },
@@ -143,7 +150,7 @@ fun PhotoPreviewCard(
                     )
                 } else {
                     Image(
-                        bitmap = bitmap.asImageBitmap(),
+                        bitmap = imageBitmap,
                         contentDescription = null,
                         // The viewport owns aspect fitting. Fill its source layer so rounded
                         // decode sizes cannot insert a fractional letterbox before geometry.
@@ -253,6 +260,7 @@ private fun GpuOrCpuEffectImage(
     modifier: Modifier = Modifier,
 ) {
     val bitmap = photo.bitmap
+    val imageBitmap = remember(bitmap) { bitmap.asImageBitmap() }
     val context = LocalContext.current
     // Render at a stable internal resolution. Binding the graph to the animated card size caused
     // a layout feedback loop and re-recorded every RenderNode on each panel-animation frame.
@@ -271,7 +279,7 @@ private fun GpuOrCpuEffectImage(
             CpuEffectImage(photo, effect, intensity, Modifier.fillMaxSize())
             if (showOriginal) {
                 Image(
-                    bitmap = bitmap.asImageBitmap(),
+                    bitmap = imageBitmap,
                     contentDescription = null,
                     contentScale = ContentScale.FillBounds,
                     modifier = Modifier.fillMaxSize(),
@@ -288,36 +296,36 @@ private fun GpuOrCpuEffectImage(
     val stampPaint = remember(effect.stamp) { AndroidPaint() }
     val windowFocused = LocalWindowInfo.current.isWindowFocused
 
-    Box(modifier) {
-        // Refresh the drawing node after modal focus changes so its external RenderNode is
-        // recorded again. Keep the graph/shaders above this key, independent of window focus.
-        key(windowFocused) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                if (showOriginal) return@Canvas
-                val scaleX = size.width / graph.width
-                val scaleY = size.height / graph.height
-                graph.update(programs, photo.seed, intensity / 100f)
-                drawIntoCanvas { canvas ->
-                    val native = canvas.nativeCanvas
-                    val save = native.save()
-                    native.scale(scaleX, scaleY)
-                    native.drawRenderNode(graph.root)
-                    if (stampLayer != null && intensity > 0 && effect.stampIntensity > 0f) {
-                        stampPaint.alpha =
-                            ((intensity / 100f * effect.stampIntensity).coerceIn(0f, 1f) * 255f).roundToInt()
-                        native.drawBitmap(stampLayer.bitmap, stampLayer.left, stampLayer.top, stampPaint)
-                    }
-                    native.restoreToCount(save)
-                }
+    // Keep comparison atomic in a single Canvas without mounting/unmounting a separate Image node,
+    // and refresh the drawing node after modal focus changes so its external RenderNode re-syncs.
+    key(windowFocused) {
+        Canvas(modifier = modifier) {
+            if (showOriginal) {
+                drawImage(
+                    image = imageBitmap,
+                    dstSize = IntSize(
+                        size.width.roundToInt().coerceAtLeast(1),
+                        size.height.roundToInt().coerceAtLeast(1),
+                    ),
+                    filterQuality = FilterQuality.Low,
+                )
+                return@Canvas
             }
-        }
-        if (showOriginal) {
-            Image(
-                bitmap = bitmap.asImageBitmap(),
-                contentDescription = null,
-                contentScale = ContentScale.FillBounds,
-                modifier = Modifier.fillMaxSize(),
-            )
+            val scaleX = size.width / graph.width
+            val scaleY = size.height / graph.height
+            graph.update(programs, photo.seed, intensity / 100f)
+            drawIntoCanvas { canvas ->
+                val native = canvas.nativeCanvas
+                val save = native.save()
+                native.scale(scaleX, scaleY)
+                native.drawRenderNode(graph.root)
+                if (stampLayer != null && intensity > 0 && effect.stampIntensity > 0f) {
+                    stampPaint.alpha =
+                        ((intensity / 100f * effect.stampIntensity).coerceIn(0f, 1f) * 255f).roundToInt()
+                    native.drawBitmap(stampLayer.bitmap, stampLayer.left, stampLayer.top, stampPaint)
+                }
+                native.restoreToCount(save)
+            }
         }
     }
 }

@@ -243,43 +243,47 @@ internal const val FILTER_FOCUS_FINISH_AGSL = FILTER_UNIFORMS_AGSL +
 half4 main(float2 coord) {
     float level = clamp(uFilterIntensity, 0.0, 1.0);
     float focusScale = uResolution.x / 1600.0;
-    float spread = max((uFocusSpread + uFocusSpreadGrowth * level) * focusScale, 0.0);
-    float verticalOffset = 1.41421356 * spread;
-    half4 above = content.eval(filterClampCoord(coord + float2(0.0, -verticalOffset)));
-    half4 center = content.eval(filterClampCoord(coord));
-    half4 below = content.eval(filterClampCoord(coord + float2(0.0, verticalOffset)));
-    float4 motionPremul = float4(float(above.r), float(above.g), float(above.b), float(above.a)) * 0.25
-        + float4(float(center.r), float(center.g), float(center.b), float(center.a)) * 0.5
-        + float4(float(below.r), float(below.g), float(below.b), float(below.a)) * 0.25;
-    float motionAlpha = motionPremul.a;
-    float3 motion = motionAlpha > 0.0
-        ? float3(motionPremul.r, motionPremul.g, motionPremul.b) / motionAlpha
-        : float3(0.0, 0.0, 0.0);
+    half4 srcH = uSource.eval(filterClampCoord(coord));
+    float3 original = filterStraight(srcH);
+    float3 motion = original;
+    if (level > 0.0 && uSoftFocus > 0.0) {
+        float spread = max((uFocusSpread + uFocusSpreadGrowth * level) * focusScale, 0.0);
+        float verticalOffset = 1.41421356 * spread;
+        half4 above = content.eval(filterClampCoord(coord + float2(0.0, -verticalOffset)));
+        half4 center = content.eval(filterClampCoord(coord));
+        half4 below = content.eval(filterClampCoord(coord + float2(0.0, verticalOffset)));
+        float4 motionPremul = float4(float(above.r), float(above.g), float(above.b), float(above.a)) * 0.25
+            + float4(float(center.r), float(center.g), float(center.b), float(center.a)) * 0.5
+            + float4(float(below.r), float(below.g), float(below.b), float(below.a)) * 0.25;
+        float motionAlpha = motionPremul.a;
+        float3 blurred = motionAlpha > 0.0
+            ? float3(motionPremul.r, motionPremul.g, motionPremul.b) / motionAlpha
+            : float3(0.0, 0.0, 0.0);
+        motion = blurred;
 
-    if (uFocusDetail > 0.0) {
-        float localRadius = 1.41421356 * uFocusDetailRadius * focusScale;
-        float3 local = float3(0.0, 0.0, 0.0);
-        for (int y = -1; y <= 1; y++) {
-            for (int x = -1; x <= 1; x++) {
-                float w = (x == 0 ? 2.0 : 1.0) * (y == 0 ? 2.0 : 1.0) / 16.0;
-                local += filterSourceRgb(coord + float2(float(x), float(y)) * localRadius) * w;
+        if (uFocusDetail > 0.0) {
+            float localRadius = 1.41421356 * uFocusDetailRadius * focusScale;
+            float3 local = float3(0.0, 0.0, 0.0);
+            for (int y = -1; y <= 1; y++) {
+                for (int x = -1; x <= 1; x++) {
+                    float w = (x == 0 ? 2.0 : 1.0) * (y == 0 ? 2.0 : 1.0) / 16.0;
+                    local += filterSourceRgb(coord + float2(float(x), float(y)) * localRadius) * w;
+                }
             }
+            float3 src = filterSourceRgb(coord);
+            float3 d = src - local;
+            float3 room = float3(d.r >= 0.0 ? 1.0 - motion.r : motion.r,
+                d.g >= 0.0 ? 1.0 - motion.g : motion.g,
+                d.b >= 0.0 ? 1.0 - motion.b : motion.b);
+            motion += uFocusDetail * d * room;
         }
-        float3 src = filterSourceRgb(coord);
-        float3 d = src - local;
-        float3 room = float3(d.r >= 0.0 ? 1.0 - motion.r : motion.r,
-            d.g >= 0.0 ? 1.0 - motion.g : motion.g,
-            d.b >= 0.0 ? 1.0 - motion.b : motion.b);
-        motion += uFocusDetail * d * room;
+        motion += uFocusLift * (1.0 - blurred);
+        motion = clamp(motion, 0.0, 1.0);
     }
-    motion += uFocusLift * (1.0 - motion);
-    motion = clamp(motion, 0.0, 1.0);
     motion = filterSharpenSource(motion, coord);
     float3 graded = filterGrade(motion);
     graded = filterGrainAdd(graded, coord);
 
-    half4 srcH = uSource.eval(filterClampCoord(coord));
-    float3 original = filterStraight(srcH);
     float alpha = float(srcH.a);
     float t = clamp(uIntensity, 0.0, 1.0);
     return half4(half(mix(original.r, graded.r, t) * alpha),

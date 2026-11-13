@@ -33,11 +33,16 @@ import kotlin.math.max
 internal class GpuRenderGraph private constructor(
     val width: Int,
     val height: Int,
+    private val source: Bitmap,
     private val stages: List<StageChain>,
     private val ownedSource: Bitmap?,
 ) {
 
-    private data class PassNode(val shader: RuntimeShader, val node: RenderNode)
+    private data class PassNode(
+        val shader: RuntimeShader,
+        val node: RenderNode,
+        val content: RenderNode?,
+    )
 
     private data class StageChain(val internal: List<PassNode>, val main: PassNode)
 
@@ -48,13 +53,37 @@ internal class GpuRenderGraph private constructor(
     val passCount: Int get() = stages.sumOf { it.internal.size + 1 }
 
     /**
-     * Push current uniforms and invalidate the stage layers. Called on every draw; cheap because
-     * shader compilation, asset decoding and display-list recording happened in [build].
+     * HWUI may discard an offscreen [RenderNode]'s display list while it is omitted from the active
+     * window display tree (for example during hold-to-compare or backgrounding). Re-record any
+     * missing pass and its downstream dependents before applying render effects and drawing.
+     */
+    private fun ensureDisplayLists() {
+        if (source.isRecycled) return
+        var reRecorded = false
+        for (stage in stages) {
+            for (pass in stage.internal) {
+                if (reRecorded || !pass.node.hasDisplayList()) {
+                    recordPass(pass.node, source, pass.content, width, height)
+                    reRecorded = true
+                }
+            }
+            if (reRecorded || !stage.main.node.hasDisplayList()) {
+                recordPass(stage.main.node, source, stage.main.content, width, height)
+                reRecorded = true
+            }
+        }
+    }
+
+    /**
+     * Ensure pass display lists are still valid, push current uniforms, and apply stage effects.
+     * Called on every draw; cheap because shader compilation, asset decoding and initial recording
+     * happened in [build], while [ensureDisplayLists] only re-records passes evicted by HWUI.
      */
     fun update(programs: List<GpuProgram>, seed: Long, intensity: Float) {
         require(programs.size == stages.size) {
             "program/stage mismatch: ${programs.size} vs ${stages.size}"
         }
+        ensureDisplayLists()
         for (i in stages.indices) {
             val stage = stages[i]
             val program = programs[i]
@@ -260,7 +289,7 @@ internal class GpuRenderGraph private constructor(
                     stages.add(StageChain(internal, main))
                     previous = main.node
                 }
-                val graph = GpuRenderGraph(width, height, stages, ownedSource)
+                val graph = GpuRenderGraph(width, height, renderSource, stages, ownedSource)
                 complete = true
                 return graph
             } catch (t: Throwable) {
@@ -310,6 +339,23 @@ internal class GpuRenderGraph private constructor(
 
             val node = RenderNode("PhotoEffects_pass")
             allocatedNodes.add(node)
+            recordPass(node, source, content, width, height)
+            node.setRenderEffect(
+                RenderEffect.createRuntimeShaderEffect(
+                    shader,
+                    GpuEffectRenderer.CONTENT_SHADER,
+                ),
+            )
+            return PassNode(shader, node, content)
+        }
+
+        private fun recordPass(
+            node: RenderNode,
+            source: Bitmap,
+            content: RenderNode?,
+            width: Int,
+            height: Int,
+        ) {
             node.setPosition(0, 0, width, height)
             node.setClipToBounds(true)
             val canvas = node.beginRecording(width, height)
@@ -327,13 +373,6 @@ internal class GpuRenderGraph private constructor(
             } finally {
                 node.endRecording()
             }
-            node.setRenderEffect(
-                RenderEffect.createRuntimeShaderEffect(
-                    shader,
-                    GpuEffectRenderer.CONTENT_SHADER,
-                ),
-            )
-            return PassNode(shader, node)
         }
 
         private fun bindAssets(

@@ -113,6 +113,52 @@ class FilterGpuInstrumentedTest {
         }
     }
 
+    @Test fun sunstoneEndpointsAndCompositionMatchCpu() {
+        width = 193
+        height = 127
+        transparentInput = true
+        val adjust = AdjustEffectFactory.create(AdjustParams().with(AdjustControl.Exposure, 15))
+        for (preset in FilterRegistry.presets.filter { it.family == "Sunstone" }) {
+            val cases = listOf(
+                intArrayOf(0, 0, 0, 0, 0, 0),
+                intArrayOf(100, preset.sharpen, preset.grain, preset.highlights, preset.shadows, preset.aberration),
+                intArrayOf(100, 50, 80, -80, 80, if (FilterControl.Aberration in preset.controls) 100 else 0),
+            )
+            for (c in cases) {
+                val filter = FilterRegistry.withControls(
+                    preset.id, c[0], c[1], grain = c[2], highlights = c[3], shadows = c[4], aberration = c[5],
+                )!!
+                assertGpuMatchesCpu(filter, "${preset.id} F=${c[0]} Sh=${c[1]} G=${c[2]} H=${c[3]} S=${c[4]} A=${c[5]} transparent")
+            }
+            val edit = EditComposition.compose(
+                EditStage(FilterRegistry.byId(preset.id)!!, 100),
+                EditStage(adjust, 100),
+                EditStage(NocturneFamily.effects.first(), 75),
+            )!!
+            assertGpuMatchesCpu(edit, "${preset.id} + Adjust + Nocturne transparent")
+        }
+    }
+
+    @Test fun halcyonFocusAndSharpenEndpointsMatchCpu() {
+        width = 193
+        height = 127
+        transparentInput = true
+        for (preset in FilterRegistry.presets.filter { it.family == "Halcyon" }) {
+            val cases = listOf(
+                intArrayOf(0, 0, 0, 0, 0, 0),
+                intArrayOf(100, preset.sharpen, 0, 0, 0, 0),
+                intArrayOf(100, preset.sharpen, preset.intensity, preset.grain, preset.highlights, preset.shadows),
+                intArrayOf(100, if (FilterControl.Sharpen in preset.controls) 100 else 0, 100, 80, 90, -70),
+            )
+            for (c in cases) {
+                val filter = FilterRegistry.withControls(
+                    preset.id, c[0], c[1], lookIntensity = c[2], grain = c[3], highlights = c[4], shadows = c[5],
+                )!!
+                assertGpuMatchesCpu(filter, "${preset.id} F=${c[0]} Sh=${c[1]} I=${c[2]} G=${c[3]} H=${c[4]} S=${c[5]} transparent")
+            }
+        }
+    }
+
     @Test fun colourOnlyStrengthMatchesAtTransparentEdges() {
         width = 160
         height = 107

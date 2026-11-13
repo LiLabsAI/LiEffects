@@ -5,7 +5,7 @@ Built with Kotlin and Jetpack Compose, minSdk 36 / targetSdk 37.
 
 ## Editing
 
-- 34 original filter recipes: Lucent, Nightfall, Marzipan, Lantern, Estuary and Mulberry with three variants each; Driftglass with six; Graphite with eight; Black Tie and Old Money with one each.
+- 40 original filter recipes: Lucent, Nightfall, Marzipan, Lantern, Estuary, Mulberry, Sunstone and Halcyon with three variants each; Driftglass with six; Graphite with eight; Black Tie and Old Money with one each.
 - Recipe-specific controls: Filter / Sharpen, Driftglass’s Filter / Intensity / Grain, Lantern’s Filter / Grain, Graphite’s variant-specific tone / aberration controls, and Estuary / Mulberry’s Filter strength.
 - Driftglass Intensity controls horizontal motion softness; colour strength and grain remain independent.
 - An Adjust layer with eight categories and 59 controls: Light, Color, HSL, Details, Stylize,
@@ -22,7 +22,7 @@ Built with Kotlin and Jetpack Compose, minSdk 36 / targetSdk 37.
 
 ## Rendering architecture
 
-The 34 Filters share one parameterized processing engine. Recipe data lives in
+The 40 Filters share one parameterized processing engine. Recipe data lives in
 `app/src/main/resources/filters/catalogue.properties`, independently of the rendering code.
 The versioned loader validates identifiers, variants, field names, numeric ranges and tonal
 endpoints. New recipes using the existing operations require catalogue changes only.
@@ -48,7 +48,10 @@ starting at Filter 100 with no grain or spatial stages.
 Mulberry adds three colour-only wine/plum/rose palettes at Filter 100, also with no grain
 or spatial stages.
 Black Tie and Old Money add two single-variant dark-luxury palettes (midnight charcoal and warm
-espresso) at Filter 100, with no grain or spatial stages.
+espresso) at Filter 100, with no grain or spatial stages. Sunstone adds warm, high-saturation slide
+tones with amber highlights, lifted copper shadows, and subtle radial aberration; Halcyon pairs
+sapphire, amethyst, and cool mint grades with balanced oval directional soft focus (`Intensity`)
+and fine grain.
 Nocturne (Gilded, Afterhours) and Marquee (Premiere, Midnight) are asset-free analytic effect
 families: one AGSL pass with a matching deterministic CPU renderer and no textures or LUTs.
 Marquee is a dark-blue cinema grade — skin-exempt cool white balance, a filmic toe and highlight
@@ -121,9 +124,7 @@ sampled source on the preview's pixel grid; fractional blur and aberration taps 
 The editor decodes a 1920-px working bitmap; export still re-decodes the original at the planned
 size. Thumbnails share one scaled source, render the current shelf, are cached by
 photo/preset/other-stage/geometry, debounce rapid control changes and stop cooperatively between rows.
-The comparison gesture retains the rendering graph. The ambient backdrop is a tiny pre-scaled
-copy instead of a live full-screen blur, and the date stamp is rasterized once per size/date
-instead of drawing hundreds of gradients each frame.
+The comparison gesture draws atomically inside one Canvas while retaining the rendering graph, and `GpuRenderGraph` re-records any HWUI-evicted pass display lists before drawing. The ambient backdrop is a tiny pre-scaled copy instead of a live full-screen blur, and the date stamp is rasterized once per size/date instead of drawing hundreds of gradients each frame.
 
 One immutable edit composition supplies both backends with the same
 filter → adjust → effect order and independent strengths. Export re-decodes the original source
@@ -156,9 +157,10 @@ late photo-load completions cannot replace a newer selection.
 
 The JVM suite covers deterministic rendering, existing effect baselines, catalogue validation,
 independent controls, Adjust categories/spatial stages, three-stage composition and export
-planning. `FilterGpuInstrumentedTest` and `AdjustGpuInstrumentedTest` compare filter and Adjust
-shaders, composition and control endpoints against their CPU renderers through real GPU readback
-on an emulator. Focused regressions cover parallel optical repeatability, transparent spatial
+planning. `FilterGpuInstrumentedTest`, `AdjustGpuInstrumentedTest` and
+`HoldToCompareInstrumentedTest` compare filter and Adjust shaders, composition, control
+endpoints and HWUI hold-to-compare retention against real GPU readback and `PixelCopy` output on an
+emulator. Focused regressions cover parallel optical repeatability, transparent spatial
 sampling, sharpening across transparent edges, source-grid resizing, Prism borders, export
 allocation retries, session restoration, late photo loads and cancelled bitmap ownership.
 Canvas coverage includes format geometry, corner containment, centroid-preserving pinch,
@@ -208,7 +210,7 @@ transparent fixtures, with their own counters and strict error limits.
 | `java/com/aliahad/photoeffects/ui/editor/CanvasPanel.kt` | Canvas formats, zoom, rotation and straightening |
 | `java/com/aliahad/photoeffects/ui/editor/EditorPanelChrome.kt` | Progressive panel header and stage transitions |
 | `java/com/aliahad/photoeffects/effect/EditComposition.kt` | Filter → Adjust → Effect stage order and allowance |
-| `java/com/aliahad/photoeffects/effect/gpu/GpuRenderGraph.kt` | Offscreen RenderNode pass graph and asset binding |
+| `java/com/aliahad/photoeffects/effect/gpu/GpuRenderGraph.kt` | Offscreen RenderNode pass graph, display-list recovery and asset binding |
 | `java/com/aliahad/photoeffects/effect/gpu/GpuEffectRenderer.kt` | AGSL compilation cache, uniforms and shader inputs |
 | `java/com/aliahad/photoeffects/effect/gpu/GpuReadback.kt` | HardwareRenderer readback for diagnostics/tests |
 | `java/com/aliahad/photoeffects/effect/cpu/NativeBlur.kt` | Optional NDK blur backend with Kotlin fallback |
@@ -225,7 +227,7 @@ transparent fixtures, with their own counters and strict error limits.
 
 ## Quality and provenance
 
-The 34 Filters are authored analytic grades inspired by digital-camera, low-light and creamy
+The 40 Filters are authored analytic grades inspired by digital-camera, low-light and creamy
 colour and soft-focus film styles. They contain no extracted reference-app LUTs or images, and do not claim an
 exact visual match to another product. Their names are catalogue labels; processing is shared
 and driven by recipe data. Older session identifiers are migrated on read, including Undo

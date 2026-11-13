@@ -42,9 +42,9 @@ class GraphitePipelineTest {
         assertEquals(-100..100, FilterControl.Shadows.range)
         assertEquals(0..100, FilterControl.Strength.range)
         assertEquals(0..100, FilterControl.Grain.range)
-        for (p in FilterRegistry.presets.filter { it.family != "Graphite" }) {
-            assertEquals(0, p.highlights)
-            assertEquals(0, p.shadows)
+        for (p in FilterRegistry.presets) {
+            if (FilterControl.Highlights !in p.controls) assertEquals(p.id, 0, p.highlights)
+            if (FilterControl.Shadows !in p.controls) assertEquals(p.id, 0, p.shadows)
         }
     }
 

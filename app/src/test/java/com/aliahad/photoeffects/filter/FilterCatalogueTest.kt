@@ -23,9 +23,9 @@ class FilterCatalogueTest {
         assertEquals(1.2f, recipe.uniforms().getValue("uExposure"), 0f)
     }
 
-    @Test fun luxuryRecipesAppendSingleVariantFamiliesWithOnlyColourStrengthAndBoundUniforms() {
+    @Test fun luxuryRecipesExposeSingleVariantFamiliesWithOnlyColourStrengthAndBoundUniforms() {
         val expected = listOf("black_tie_1" to "Black Tie", "old_money_1" to "Old Money")
-        assertEquals(expected.map { it.first }, FilterRegistry.presets.takeLast(2).map { it.id })
+        assertTrue(FilterRegistry.presets.map { it.id }.containsAll(expected.map { it.first }))
         for ((id, family) in expected) {
             val p = FilterRegistry.paramsById(id)!!
             val filter = FilterRegistry.byId(id)!!
@@ -104,5 +104,28 @@ class FilterCatalogueTest {
         """.trimIndent()
         val error = runCatching { FilterCatalogue.read(data.reader()) }.exceptionOrNull()
         assertTrue(error is IllegalArgumentException)
+    }
+
+    @Test fun sunstoneAndHalcyonBindMultiPassUniformsAndHaveUniqueGrainSeeds() {
+        val addedIds = listOf("sunstone_1", "sunstone_2", "sunstone_3", "halcyon_1", "halcyon_2", "halcyon_3")
+        val scalarPattern = Regex("""uniform float (\w+);""")
+        for (id in addedIds) {
+            val p = requireNotNull(FilterRegistry.paramsById(id)) { "Missing $id" }
+            val effect = requireNotNull(FilterRegistry.byId(id)) { "Missing effect $id" }
+            assertFalse("$id must not combine softFocus and aberration", p.softFocus > 0f && p.aberration > 0)
+            assertTrue("$id summary should be non-blank", p.summary.isNotBlank())
+            val gpu = effect.gpu
+            assertEquals("$id uniforms map", p.uniforms(), gpu.uniforms)
+            val declaredScalars = (listOf(gpu.agslSource) + gpu.internalPasses.map { it.agslSource })
+                .flatMap { source -> scalarPattern.findAll(source).map { it.groupValues[1] }.toList() }
+                .toSet()
+            assertTrue(
+                "$id undeclared scalar uniforms: ${declaredScalars - gpu.uniforms.keys - "uIntensity"}",
+                (declaredScalars - "uIntensity").all { it in gpu.uniforms.keys },
+            )
+            assertEquals("$id grainSeed range", true, p.grainSeed in 1..4090)
+        }
+        val nonzeroSeeds = FilterRegistry.presets.map { it.grainSeed }.filter { it > 0 }
+        assertEquals("Every seeded preset must have a unique grainSeed", nonzeroSeeds.size, nonzeroSeeds.distinct().size)
     }
 }

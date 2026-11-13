@@ -4,7 +4,7 @@
 
 Android photo editor (`com.aliahad.photoeffects`, single `:app` module, Kotlin + Compose,
 minSdk 36 / target 37) with 35 presets across ten effect families
-(Motes, Lumen, Daymark, Velour, Paperlight, Prism, Nocturne, Marquee, Solstice, Screenprint), 34 catalogue-driven
+(Motes, Lumen, Daymark, Velour, Paperlight, Prism, Nocturne, Marquee, Solstice, Screenprint), 40 catalogue-driven
 filters, and an Adjust layer with 8 categories / 59 controls (Light, Color, HSL, Details, Stylize,
 Refocus, Optical, Blur). Every look exists twice — an AGSL `RuntimeShader` for the live preview and a deterministic
 CPU mirror used for thumbnails, JVM tests and the Save export. The render order is

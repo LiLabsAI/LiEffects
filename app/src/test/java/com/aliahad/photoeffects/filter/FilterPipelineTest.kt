@@ -24,9 +24,9 @@ class FilterPipelineTest {
     }
 
     @Test fun catalogueContainsEveryRequestedVariant() {
-        assertEquals(listOf("Lucent", "Nightfall", "Marzipan", "Driftglass", "Lantern", "Graphite", "Estuary", "Mulberry", "Black Tie", "Old Money"), FilterRegistry.shelves.map { it.id })
-        assertEquals(34, FilterRegistry.all.size)
-        assertEquals(34, FilterRegistry.all.map { it.id }.toSet().size)
+        assertEquals(listOf("Lucent", "Nightfall", "Marzipan", "Driftglass", "Lantern", "Graphite", "Estuary", "Mulberry", "Black Tie", "Old Money", "Sunstone", "Halcyon"), FilterRegistry.shelves.map { it.id })
+        assertEquals(40, FilterRegistry.all.size)
+        assertEquals(40, FilterRegistry.all.map { it.id }.toSet().size)
         for (shelf in FilterRegistry.shelves) {
             val count = when (shelf.id) {
                 "Driftglass" -> 6

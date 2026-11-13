@@ -364,7 +364,7 @@ object RenderDiagnostics {
         }
         // Point-sharpen input also belongs to internal grade/focus programs when those controls
         // are supplied; protect the complete pass graph, not just the default Lucent single pass.
-        for (id in listOf("driftglass_1", "graphite_2")) {
+        for (id in listOf("driftglass_1", "graphite_2", "sunstone_2", "halcyon_3")) {
             val effect = requireNotNull(FilterRegistry.withControls(id, 100, 100))
             verify("$id transparent sharpen=100", effect,
                 syntheticSource(WIDTH, HEIGHT, true), WIDTH, HEIGHT)
