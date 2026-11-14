@@ -44,7 +44,7 @@ Instrumented tests exist but cannot run on the test device: its ROM rejects test
   Items; tapping the selected preset again (or the header Edit action) opens Edit. Adjust
   control selection opens Edit directly.
 - `docs/` holds local validation artifacts and is gitignored by design. Keep the GitHub repo
-  (`aliahadmd/Photoeffects`) private and app-source-only.
+  (`LiLabsAI/LiEffects`) private and app-source-only.
 - Do not commit, push, or create releases unless the user explicitly asks.
 
 ## Device checks
