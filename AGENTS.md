@@ -43,8 +43,8 @@ Instrumented tests exist but cannot run on the test device: its ROM rejects test
   animated panel height. For Effects/Filters, a single tap auditions a preset and stays in
   Items; tapping the selected preset again (or the header Edit action) opens Edit. Adjust
   control selection opens Edit directly.
-- `docs/` holds local validation artifacts and is gitignored by design. Keep the GitHub repo
-  (`LiLabsAI/LiEffects`) private and app-source-only.
+- `docs/` holds local validation artifacts and is gitignored by design. Keep the public GitHub repo
+  (`LiLabsAI/LiEffects`) app-source-only.
 - Do not commit, push, or create releases unless the user explicitly asks.
 
 ## Device checks

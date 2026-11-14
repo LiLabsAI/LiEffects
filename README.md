@@ -2,6 +2,8 @@
 
 # LiEffects
 
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+
 An Android photo editor with live colour grading, film effects and full-resolution JPEG export.
 Built with Kotlin and Jetpack Compose (`minSdk` 36 / `targetSdk` 37, retaining `applicationId`
 `com.aliahad.photoeffects` for seamless in-place upgrades).
@@ -254,3 +256,16 @@ Ultrasharp, Midtone, Vintage, Fisheye and zoom/radial/directional blur) still ne
 Further transparent-edge visual validation and 16-bit/high-precision intermediates remain
 future work. The photo picker may strip source GPS before the editor receives it; Keep metadata
 can copy only the tags actually available to the app.
+
+## License and contributing
+
+Copyright (C) 2026 Ali Ahad
+
+LiEffects is free software: you can redistribute it and/or modify it under the terms of the
+[GNU General Public License](LICENSE) as published by the Free Software Foundation, either version 3
+of the License, or (at your option) any later version (`GPL-3.0-or-later`). Source code and original
+brand/filter assets are covered under these terms, requiring modified distributions and derivatives
+to preserve attribution notices and remain open source under GPLv3 (see [Quality and provenance](#quality-and-provenance)
+above regarding legacy reference-derived assets).
+
+Bug reports, forks, and pull requests from the community are welcome.
