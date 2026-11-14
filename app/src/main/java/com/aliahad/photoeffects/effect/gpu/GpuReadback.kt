@@ -18,7 +18,7 @@ import com.aliahad.photoeffects.canvas.CanvasGeometry
  * the deterministic CPU renderer.
  */
 object GpuReadback {
-    private const val TAG = "PhotoEffectsGpu"
+    private const val TAG = "LiEffectsGpu"
 
     fun render(
         context: Context,

@@ -146,7 +146,7 @@ internal class GpuRenderGraph private constructor(
     }
 
     companion object {
-        private const val TAG = "PhotoEffectsGpu"
+        private const val TAG = "LiEffectsGpu"
 
         /** Flattens a composed program chain (base first). */
         fun programs(program: GpuProgram): List<GpuProgram> {
@@ -337,7 +337,7 @@ internal class GpuRenderGraph private constructor(
             for (name in originalAlphaInputs) shader.setInputShader(name, originalAlphaShader!!)
             opaqueSourceUniform?.let { shader.setFloatUniform(it, if (source.hasAlpha()) 0f else 1f) }
 
-            val node = RenderNode("PhotoEffects_pass")
+            val node = RenderNode("LiEffects_pass")
             allocatedNodes.add(node)
             recordPass(node, source, content, width, height)
             node.setRenderEffect(

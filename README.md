@@ -1,7 +1,13 @@
-# Photo effects
+![LiEffects](branding/lieffects-logo.png)
+
+# LiEffects
 
 An Android photo editor with live colour grading, film effects and full-resolution JPEG export.
-Built with Kotlin and Jetpack Compose, minSdk 36 / targetSdk 37.
+Built with Kotlin and Jetpack Compose (`minSdk` 36 / `targetSdk` 37, retaining `applicationId`
+`com.aliahad.photoeffects` for seamless in-place upgrades).
+
+Brand assets (adaptive + monochrome vector drawables, density mipmaps, `512×512` store icon,
+standalone SVGs and high-res PNGs) live under `branding/` and `app/src/main/res/`.
 
 ## Editing
 
@@ -175,7 +181,7 @@ On-device diagnostics are built into the app because test-APK installation is bl
 ```bash
 adb shell am force-stop com.aliahad.photoeffects
 adb shell am start -n com.aliahad.photoeffects/.MainActivity --ez render_diagnostics true
-adb logcat -s RenderDiagnostics PhotoEffectsGpu
+adb logcat -s RenderDiagnostics LiEffectsGpu
 ```
 
 The debug-only harness runs separately from editor rendering, compares every GPU program

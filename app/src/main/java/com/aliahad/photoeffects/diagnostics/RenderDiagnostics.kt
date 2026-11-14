@@ -29,7 +29,7 @@ import kotlin.math.abs
  * Exact Filters/Adjust parity is checked separately from the explicitly approximate legacy
  * Effects. Legacy results retain measured differences and use family-specific regression
  * envelopes on this fixed fixture; meeting an envelope does not establish pixel parity.
- * GPU timings include graph construction and readback, so they are not live preview frame times. See `PhotoEffectsGpu` / `RenderDiagnostics` in logcat.
+ * GPU timings include graph construction and readback, so they are not live preview frame times. See `LiEffectsGpu` / `RenderDiagnostics` in logcat.
  */
 object RenderDiagnostics {
     private const val TAG = "RenderDiagnostics"

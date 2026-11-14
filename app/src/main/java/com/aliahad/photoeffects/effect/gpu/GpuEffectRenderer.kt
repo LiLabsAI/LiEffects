@@ -19,7 +19,7 @@ import java.util.concurrent.ConcurrentHashMap
 object GpuEffectRenderer {
 
     const val CONTENT_SHADER = "content"
-    private const val TAG = "PhotoEffectsGpu"
+    private const val TAG = "LiEffectsGpu"
 
     // RuntimeShader includes mutable uniforms and child bindings. Sharing one by source made
     // offscreen diagnostics and a live preview overwrite each other, even across distinct graphs.

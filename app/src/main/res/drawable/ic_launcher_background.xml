@@ -5,7 +5,7 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Dark shell of the editor, with a warm glow behind the print. -->
+    <!-- LiEffects obsidian darkroom backdrop with subtle warm optical halo -->
     <path android:pathData="M0,0h108v108h-108z">
         <aapt:attr name="android:fillColor">
             <gradient
@@ -14,7 +14,7 @@
                 android:gradientRadius="64"
                 android:type="radial">
                 <item
-                    android:color="#FF17171B"
+                    android:color="#FF17171E"
                     android:offset="0" />
                 <item
                     android:color="#FF0B0B0D"
@@ -25,13 +25,16 @@
     <path android:pathData="M0,0h108v108h-108z">
         <aapt:attr name="android:fillColor">
             <gradient
-                android:centerX="62"
-                android:centerY="46"
-                android:gradientRadius="52"
+                android:centerX="64"
+                android:centerY="42"
+                android:gradientRadius="48"
                 android:type="radial">
                 <item
-                    android:color="#3DF6A21E"
+                    android:color="#42F6A21E"
                     android:offset="0" />
+                <item
+                    android:color="#0FF6A21E"
+                    android:offset="0.55" />
                 <item
                     android:color="#00F6A21E"
                     android:offset="1" />

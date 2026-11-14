@@ -10,7 +10,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-/** PhotoEffects dark editor palette. */
+/** LiEffects dark editor palette. */
 object EditorColors {
     val Background = Color(0xFF0B0B0D)
     val Panel = Color(0xFF111115)
@@ -57,7 +57,7 @@ private val EditorTypography = Typography(
 )
 
 @Composable
-fun PhotoEffectsTheme(content: @Composable () -> Unit) {
+fun LiEffectsTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = darkColorScheme(
             primary = EditorColors.Accent,

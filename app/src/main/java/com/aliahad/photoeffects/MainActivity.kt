@@ -21,7 +21,7 @@ import com.aliahad.photoeffects.effect.PaperlightFamily
 import com.aliahad.photoeffects.diagnostics.RenderDiagnostics
 import com.aliahad.photoeffects.ui.editor.EditorRoute
 import com.aliahad.photoeffects.ui.editor.EditorViewModel
-import com.aliahad.photoeffects.ui.theme.PhotoEffectsTheme
+import com.aliahad.photoeffects.ui.theme.LiEffectsTheme
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
@@ -58,7 +58,7 @@ class MainActivity : ComponentActivity() {
         }
         val editor = ViewModelProvider(this)[EditorViewModel::class.java]
         setContent {
-            PhotoEffectsTheme {
+            LiEffectsTheme {
                 EditorRoute(editor)
             }
         }

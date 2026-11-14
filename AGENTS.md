@@ -2,7 +2,7 @@
 
 ## What this is
 
-Android photo editor (`com.aliahad.photoeffects`, single `:app` module, Kotlin + Compose,
+**LiEffects** Android photo editor (`com.aliahad.photoeffects` kept for in-place upgrades, single `:app` module, Kotlin + Compose,
 minSdk 36 / target 37) with 35 presets across ten effect families
 (Motes, Lumen, Daymark, Velour, Paperlight, Prism, Nocturne, Marquee, Solstice, Screenprint), 40 catalogue-driven
 filters, and an Adjust layer with 8 categories / 59 controls (Light, Color, HSL, Details, Stylize,

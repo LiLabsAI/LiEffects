@@ -31,5 +31,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Photo effects"
+rootProject.name = "LiEffects"
 include(":app")
